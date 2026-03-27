@@ -196,7 +196,7 @@ POSTGRES_PASSWORD=seu_password_aqui
 POSTGRES_DB=macroeconomic_data
 
 # Ou use URL completa:
-SQLALCHEMY_DATABASE_URL=postgresql://macroeconomist:senha@localhost:5432/macroeconomic_data
+SQLALCHEMY_DATABASE_URL=postgresql://<usuario>:<senha>@localhost:5432/macroeconomic_data
 """
 
 

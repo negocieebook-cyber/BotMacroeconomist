@@ -49,13 +49,13 @@ OPÇÃO A: Docker (mais fácil, recomendado)
 
   2. Abra PowerShell e execute este comando:
 
-      docker run --name postgres-macro -e POSTGRES_PASSWORD=1234 -p 5432:5432 -d postgres:15
+      docker run --name postgres-macro -e POSTGRES_PASSWORD=<sua_senha_forte> -p 5432:5432 -d postgres:15
 
   3. Pronto! PostgreSQL está rodando
 
   O QUE SIGNIFICA:
   • --name postgres-macro = fazer um banco chamado "postgres-macro"
-  • POSTGRES_PASSWORD=1234 = senha é "1234" (use esta mesmo!)
+  • POSTGRES_PASSWORD=<sua_senha_forte> = defina uma senha forte e guarde ela
   • -p 5432:5432 = porta 5432 (padrão)
   • postgres:15 = versão 15 do PostgreSQL
 
@@ -68,7 +68,7 @@ OPÇÃO B: Instalar direto no Windows (mais trabalhoso)
   2. Execute: postgresql-15.x-windows-x64.exe
 
   3. Na instalação, quando pedir senha do usuário "postgres":
-     Use: 1234
+     Crie uma senha forte e anote para usar no `.env`
 
   4. PostgreSQL vai iniciar automaticamente
 
@@ -101,7 +101,7 @@ Nesta pasta, você tem um arquivo chamado: .env.example
      POSTGRES_HOST=localhost                 ← OK
      POSTGRES_PORT=5432                      ← OK
      POSTGRES_USER=postgres                  ← MUDE para "postgres"
-     POSTGRES_PASSWORD=1234                  ← Esta é a senha que você usou!
+     POSTGRES_PASSWORD=sua_senha_forte       ← Use a mesma senha definida na instalação
      POSTGRES_DB=macroeconomic_data          ← OK
 
   5. Salve o arquivo (Ctrl+S)

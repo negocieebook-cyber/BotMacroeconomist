@@ -232,7 +232,7 @@ def main():
         print("   2. Verifique as credenciais em .env")
         print("   3. Verifique POSTGRES_HOST e POSTGRES_PORT")
         print("\n   Comando para rodar PostgreSQL (Docker):")
-        print("   docker run --name postgres -e POSTGRES_PASSWORD=password \\")
+        print("   docker run --name postgres -e POSTGRES_PASSWORD=<sua_senha_forte> \\")
         print("      -p 5432:5432 -d postgres:15")
         logger.error("Setup falhou: Não foi possível conectar ao PostgreSQL")
         return False

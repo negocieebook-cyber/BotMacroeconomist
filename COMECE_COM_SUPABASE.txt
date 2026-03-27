@@ -41,7 +41,7 @@ PASSO 1: PEGAR CONNECTION STRING DO SUPABASE (⏱️ 2 minutos)
 
 6. Você vai ver algo assim:
 
-   postgresql://postgres.xxxxxabcde:abcde123xxx@db.xxxxxabcde.supabase.co:5432/postgres
+   postgresql://postgres.<project-ref>:<db-password>@db.<project-ref>.supabase.co:5432/postgres
 
    Copie TODA essa string (Ctrl+C)
 
@@ -65,13 +65,13 @@ PASSO 2: CONFIGURAR .env (⏱️ 2 minutos)
 
 5. Substitua por (cola a string do Supabase):
 
-   SQLALCHEMY_DATABASE_URL=postgresql://postgres.xxxxxabcde:abcde123xxx@db.xxxxxabcde.supabase.co:5432/postgres
+   SQLALCHEMY_DATABASE_URL=postgresql://postgres.<project-ref>:<db-password>@db.<project-ref>.supabase.co:5432/postgres
 
    (Sem o # na frente!)
 
 6. Se não tiver a linha, adicione logo embaixo de todas as outras configs:
 
-   SQLALCHEMY_DATABASE_URL=sua_string_aqui
+   SQLALCHEMY_DATABASE_URL=<cole_aqui_sua_connection_string>
 
 7. Salve (Ctrl+S)
 
