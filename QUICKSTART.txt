@@ -1,0 +1,95 @@
+🚀 COMECE AQUI - GUIA RÁPIDO
+═══════════════════════════════════════════════════════════════════
+
+1️⃣  INSTALE AS DEPENDÊNCIAS
+────────────────────────────────────────────────────────────────
+
+Windows:
+  python -m venv venv
+  venv\Scripts\activate
+  pip install -r requirements.txt
+
+Mac/Linux:
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+
+2️⃣  VALIDE A INSTALAÇÃO
+────────────────────────────────────────────────────────────────
+
+  python test_setup.py
+
+Se todos os testes passarem ✅, você está pronto!
+
+3️⃣  EXECUTE A DEMONSTRAÇÃO
+────────────────────────────────────────────────────────────────
+
+  python main.py demo
+
+Isso vai:
+  • Inicializar o agente
+  • Coletar dados de 2 APIs
+  • Buscar na memória
+  • Analisar indicadores
+  • Mostrar status
+
+4️⃣  MODO PRODUÇÃO (Opcional)
+────────────────────────────────────────────────────────────────
+
+  python main.py
+
+O agente vai rodar 24/7 coletando dados nas horas programadas!
+
+═══════════════════════════════════════════════════════════════════
+
+📚 DOCUMENTAÇÃO COMPLETA
+
+Abra README.md para:
+  • Descrição detalhada de todas as APIs
+  • Como usar programaticamente
+  • Troubleshooting
+  • Roadmap do projeto
+
+═══════════════════════════════════════════════════════════════════
+
+❓ PERGUNTAS FREQUENTES
+
+P: Preciso configurar alguma chave de API?
+R: Não! FRED, IMF, World Bank, OECD, BIS são 100% gratuitas.
+   Opcionalmente, adicione chave FRED em .env para mais requisições.
+
+P: Qual é o custo?
+R: $0 - Todas as APIs são oficiais e gratuitas.
+
+P: Posso usar em produção?
+R: Sim! O agente é robusto com retry automático e error handling.
+
+P: Quanto espaço de disco usa?
+R: ~1-5 MB/semana para armazenar embeddings e dados.
+
+P: Posso adicionar mais APIs?
+R: Claro! A estrutura é extensível. Veja a pasta apis/.
+
+═══════════════════════════════════════════════════════════════════
+
+🎯 ARQUITETURA
+
+Dados (5 APIs) 
+    ↓
+Coleta (APIs) 
+    ↓
+Processamento (EmbeddingManager)
+    ↓
+Armazenamento (ChromaDB)
+    ↓
+Busca Semântica (Memory)
+    ↓
+Análise (MacroeconomicAnalyzer)
+
+═══════════════════════════════════════════════════════════════════
+
+✅ PRONTO? EXECUTE:
+
+python main.py demo
+
+═══════════════════════════════════════════════════════════════════
