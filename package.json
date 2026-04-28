@@ -1,0 +1,29 @@
+{
+  "name": "botmacroeconomist",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Atalhos npm para subir o BotMacroeconomist",
+  "scripts": {
+    "up": "node scripts/run-bot.js start",
+    "dev": "node scripts/run-bot.js start",
+    "start": "node scripts/run-bot.js start",
+    "demo": "node scripts/run-bot.js demo",
+    "health": "python health_check.py",
+    "test:light": "python test_lightweight.py",
+    "status": "node scripts/run-bot.js status",
+    "bootstrap-learning": "node scripts/run-bot.js bootstrap-learning",
+    "learning-catalog": "node scripts/run-bot.js learning-catalog",
+    "daily": "node scripts/run-bot.js daily",
+    "weekly": "node scripts/run-bot.js weekly",
+    "editorial-learn": "node scripts/run-bot.js editorial-learn",
+    "full-cycle": "node scripts/run-bot.js full-cycle",
+    "tracked-profiles": "node scripts/run-bot.js tracked-profiles",
+    "x-drafts": "node scripts/run-bot.js x-drafts",
+    "x-check": "node scripts/run-bot.js x-check",
+    "newsletter-preview": "node scripts/run-bot.js newsletter-preview",
+    "chat": "node scripts/run-bot.js chat",
+    "telegram": "node scripts/run-bot.js telegram-listen"
+  }
+}
+
+

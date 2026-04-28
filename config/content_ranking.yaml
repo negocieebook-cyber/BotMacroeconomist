@@ -1,0 +1,15 @@
+weights:
+  recency: 0.35
+  trust: 0.25
+  novelty: 0.15
+  topic_priority: 0.25
+
+topic_priority:
+  inflacao: 0.95
+  juros: 0.95
+  atividade: 0.85
+  emprego: 0.85
+  fiscal: 0.75
+  commodities: 0.70
+  helio: 0.80
+  outros: 0.50

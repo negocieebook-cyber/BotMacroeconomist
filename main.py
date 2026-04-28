@@ -8,10 +8,28 @@ Comandos:
     python main.py learning
     python main.py ask <pergunta>
     python main.py chat
+    python main.py macro-chat
     python main.py telegram-listen
     python main.py learn-now
     python main.py collect-articles
     python main.py daily-thesis
+    python main.py bootstrap-learning
+    python main.py bootstrap-assets
+    python main.py learning-catalog
+    python main.py daily
+    python main.py weekly
+    python main.py editorial-learn
+    python main.py full-cycle
+    python main.py topic <tema>
+    python main.py ingest [--text ... --url ... --fact ... --source ... --topic ...]
+    python main.py tracked-profiles
+    python main.py x-drafts
+    python main.py x-schedule
+    python main.py x-tomorrow
+    python main.py x-check
+    python main.py newsletter-preview
+    python main.py newsletter-draft
+    python main.py telegram-editorial
     python main.py thesis <tema>
     python main.py source-demo
     python main.py rss <feed_url> [source_name]
@@ -23,12 +41,23 @@ Comandos:
     python main.py telegram-chat-id
 """
 
+import json
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
+import yaml
 from agents.macroeconomist import MacroeconomistAgent
+from collect.x_collect import diagnose_x_api
+from collect.manual_ingest import ingest_manual_item
 from config import ENABLE_TELEGRAM_NOTIFICATIONS, LOG_FILE, LOG_LEVEL
+from interfaces.telegram_bot import start_telegram_bot
+from knowledge.document_learning import build_source_catalog
+from learn.bootstrap_user_context import bootstrap_user_learning
+from scheduler.content_scheduler import format_latest_x_drafts, format_week_schedule
+from scheduler.daily_jobs import run_content_generation_pipeline, run_daily_pipeline, run_topic_pipeline
+from scheduler.weekly_jobs import run_learning_pipeline, run_weekly_pipeline
 from utils import (
     TelegramNotifier,
     build_market_report,
@@ -38,6 +67,53 @@ from utils import (
 )
 
 logger = setup_logger(LOG_LEVEL, LOG_FILE)
+
+
+def _file_is_current(path: Path, scope: str = "day") -> bool:
+    if not path.exists():
+        return False
+
+    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    now = datetime.now(timezone.utc)
+
+    if scope == "week":
+        return modified.isocalendar()[:2] == now.isocalendar()[:2]
+
+    return modified.date() == now.date()
+
+
+def ensure_startup_pipelines(base_dir: Path) -> None:
+    """Garante que os artefatos principais do fluxo expandido existam ao subir o projeto."""
+    daily_history = base_dir / "data" / "processed" / "daily_history.json"
+    weekly_history = base_dir / "data" / "processed" / "weekly_history.json"
+    learning_history = base_dir / "data" / "processed" / "learning_history.json"
+
+    if not _file_is_current(daily_history, scope="day"):
+        logger.info("Pipeline diario ainda nao foi gerado hoje. Executando sincronizacao inicial...")
+        try:
+            run_daily_pipeline(base_dir)
+        except Exception as e:
+            logger.warning(f"Nao foi possivel concluir a sincronizacao diaria inicial: {str(e)}")
+    else:
+        logger.info("Pipeline diario ja esta atualizado para hoje.")
+
+    if not _file_is_current(weekly_history, scope="week"):
+        logger.info("Pipeline semanal ainda nao foi gerado nesta semana. Executando sincronizacao inicial...")
+        try:
+            run_weekly_pipeline(base_dir)
+        except Exception as e:
+            logger.warning(f"Nao foi possivel concluir a sincronizacao semanal inicial: {str(e)}")
+    else:
+        logger.info("Pipeline semanal ja esta atualizado nesta semana.")
+
+    if not _file_is_current(learning_history, scope="week"):
+        logger.info("Pipeline de aprendizado ainda nao foi gerado nesta semana. Executando sincronizacao inicial...")
+        try:
+            run_learning_pipeline(base_dir)
+        except Exception as e:
+            logger.warning(f"Nao foi possivel concluir a sincronizacao de aprendizado inicial: {str(e)}")
+    else:
+        logger.info("Pipeline de aprendizado ja esta atualizado nesta semana.")
 
 
 def format_status_text(status: dict) -> str:
@@ -135,12 +211,7 @@ def format_thesis_text(thesis: dict) -> str:
 
 
 def format_chat_answer(response: dict) -> str:
-    lines = [
-        "Conversa com a memoria do bot",
-        f"Horario: {response.get('timestamp', '-')}",
-        "",
-        response.get("answer", "Sem resposta."),
-    ]
+    lines = [response.get("answer", "Sem resposta.")]
 
     sources = response.get("sources", [])
     if sources:
@@ -229,17 +300,17 @@ def run_ask(question: str) -> None:
 
 
 def run_chat() -> None:
-    agent = MacroeconomistAgent(enable_scheduler=False)
+    agent = MacroeconomistAgent(enable_scheduler=False, quiet_console=True)
     try:
-        logger.info("Modo chat iniciado. Digite sua pergunta ou 'sair' para encerrar.")
-        logger.info("Exemplo: o que voce aprendeu hoje sobre inflacao?")
+        print("Chat iniciado. Digite sua pergunta ou 'sair' para encerrar.")
+        print("Exemplo: o que voce aprendeu hoje sobre inflacao?")
 
         while True:
             question = input("\nVoce: ").strip()
             if not question:
                 continue
             if question.lower() in {"sair", "exit", "quit"}:
-                logger.info("Chat encerrado.")
+                print("Chat encerrado.")
                 break
 
             response = agent.answer_learning_question(
@@ -247,7 +318,32 @@ def run_chat() -> None:
                 n_results=5,
                 session_id="terminal_chat",
             )
-            print("\nBot:\n" + response.get("answer", "Sem resposta."))
+            print("\nBot:\n" + format_chat_answer(response))
+    finally:
+        agent.shutdown()
+
+
+def run_macro_chat() -> None:
+    agent = MacroeconomistAgent(enable_scheduler=False, quiet_console=True)
+    try:
+        print("Macro Chat iniciado. Digite 'sair' para encerrar.")
+        print("Aqui a conversa e sobre processo, tese, riscos e leitura de cenario.")
+        print("Exemplo: como voce esta formando sua tese hoje?")
+
+        while True:
+            question = input("\nVoce: ").strip()
+            if not question:
+                continue
+            if question.lower() in {"sair", "exit", "quit"}:
+                print("Macro Chat encerrado.")
+                break
+
+            response = agent.answer_macro_consultant_question(
+                question,
+                n_results=6,
+                session_id="terminal_macro_chat",
+            )
+            print("\nMacro:\n" + format_chat_answer(response))
     finally:
         agent.shutdown()
 
@@ -277,6 +373,164 @@ def run_daily_thesis() -> None:
         logger.info(f"Tese diaria: {result}")
     finally:
         agent.shutdown()
+
+
+def run_bootstrap_learning() -> None:
+    summary = bootstrap_user_learning(Path(__file__).resolve().parent)
+    logger.info(f"Bootstrap de conhecimento concluido: {summary}")
+
+
+def run_bootstrap_assets() -> None:
+    """Reconstroi ou sincroniza os assets de conhecimento curado (seed_profiles, cards, etc)."""
+    base_dir = Path(__file__).resolve().parent
+    summary = bootstrap_user_learning(base_dir)
+    catalog = build_source_catalog(base_dir)
+    logger.info(f"Bootstrap de assets concluido. Conhecimento: {summary} | Catalogo: {len(catalog)} item(ns)")
+
+
+def run_learning_catalog() -> None:
+    catalog = build_source_catalog(Path(__file__).resolve().parent)
+    if not catalog:
+        logger.info("Nenhuma fonte curada encontrada em knowledge/seed_profiles.json")
+        return
+
+    lines = ["Catalogo de aprendizado curado:"]
+    for item in catalog:
+        label = item.get("name", "sem nome")
+        role = item.get("role", "sem papel")
+        item_type = item.get("type", "item")
+        url = item.get("url", "")
+        suffix = f" | {url}" if url else ""
+        lines.append(f"- {item_type}: {label} | {role}{suffix}")
+
+    logger.info("\n" + "\n".join(lines))
+
+
+def run_editorial_daily() -> None:
+    run_daily_pipeline(Path(__file__).resolve().parent)
+
+
+def run_editorial_weekly() -> None:
+    run_weekly_pipeline(Path(__file__).resolve().parent)
+
+
+def run_editorial_learning() -> None:
+    run_learning_pipeline(Path(__file__).resolve().parent)
+
+
+def run_full_cycle() -> None:
+    base_dir = Path(__file__).resolve().parent
+    logger.info("Executando ciclo completo unificado: daily -> weekly -> editorial-learn")
+    run_daily_pipeline(base_dir)
+    run_weekly_pipeline(base_dir)
+    run_learning_pipeline(base_dir)
+    logger.info("Ciclo completo finalizado.")
+
+
+def run_editorial_topic(topic_name: str) -> None:
+    run_topic_pipeline(Path(__file__).resolve().parent, topic_name)
+
+
+def run_editorial_ingest(command_args: list) -> None:
+    payload = {
+        "text": None,
+        "url": None,
+        "fact": None,
+        "source": "manual",
+        "topic": None,
+    }
+
+    key = None
+    for item in command_args:
+        if item.startswith("--"):
+            key = item[2:]
+            continue
+        if key in payload:
+            payload[key] = item
+            key = None
+
+    ingest_manual_item(Path(__file__).resolve().parent, payload)
+    logger.info("Conteudo manual salvo no inbox.")
+
+
+def run_editorial_telegram() -> None:
+    start_telegram_bot(Path(__file__).resolve().parent)
+
+
+def run_tracked_profiles() -> None:
+    config_path = Path(__file__).resolve().parent / "config" / "x_accounts.yaml"
+    if not config_path.exists():
+        logger.info("Arquivo config/x_accounts.yaml nao encontrado.")
+        return
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    lines = ["Perfis acompanhados no X:"]
+
+    for section in ["news", "macro_specialists", "reference_style"]:
+        handles = config.get(section, [])
+        if not handles:
+            continue
+        lines.append(f"{section}: {len(handles)} perfil(is)")
+        for handle in handles:
+            meta = (config.get("metadata", {}) or {}).get(handle, {})
+            role = meta.get("role", section)
+            url = meta.get("url", "")
+            suffix = f" | {url}" if url else ""
+            lines.append(f"- @{handle} | {role}{suffix}")
+
+    logger.info("\n" + "\n".join(lines))
+
+
+def run_x_drafts_preview() -> None:
+    logger.info("\n" + format_latest_x_drafts(Path(__file__).resolve().parent))
+
+
+def run_x_schedule() -> None:
+    text = format_week_schedule(Path(__file__).resolve().parent)
+    logger.info("\n" + text)
+
+
+def run_x_tomorrow() -> None:
+    base_dir = Path(__file__).resolve().parent
+    payload = run_content_generation_pipeline(base_dir, send_telegram=True)
+    tomorrow = payload["tomorrow"]
+    lines = [f"Drafts gerados para {tomorrow['date']}:"]
+    for draft in tomorrow.get("drafts", []):
+        lines.append(f"- {draft['time_brt']} | {draft['type']}: {draft['text'][:80]}")
+    logger.info("\n" + "\n".join(lines))
+
+
+def run_x_check() -> None:
+    result = diagnose_x_api(Path(__file__).resolve().parent)
+    lines = [
+        "Diagnostico do X API",
+        f"Status: {result.get('status', '-')}",
+        f"Mensagem: {result.get('message', '-')}",
+        f"Handle testado: {result.get('handle_tested', '-')}",
+        f"HTTP: {result.get('http_status', '-')}",
+        f"Base: {result.get('api_base', '-')}",
+    ]
+    details = result.get("details", {})
+    if details:
+        lines.append("Detalhes:")
+        for key, value in details.items():
+            lines.append(f"- {key}: {value}")
+    logger.info("\n" + "\n".join(lines))
+
+
+def run_newsletter_preview() -> None:
+    output = Path(__file__).resolve().parent / "data" / "published" / "newsletter_draft.md"
+    if not output.exists():
+        logger.info("Nenhuma newsletter encontrada. Rode `python main.py weekly` primeiro.")
+        return
+
+    logger.info("\nNewsletter atual:\n" + output.read_text(encoding="utf-8"))
+
+
+def run_newsletter_draft() -> None:
+    base_dir = Path(__file__).resolve().parent
+    run_weekly_pipeline(base_dir)
+    run_newsletter_preview()
 
 
 def run_source_demo() -> None:
@@ -321,6 +575,38 @@ def run_daily_digest() -> None:
     agent = MacroeconomistAgent(enable_scheduler=False)
     try:
         agent.send_daily_learning_digest()
+    finally:
+        agent.shutdown()
+
+
+def run_briefing() -> None:
+    """Gera e envia o Briefing de Fechamento do Dia imediatamente (para testes ou sob demanda)."""
+    agent = MacroeconomistAgent(enable_scheduler=False)
+    try:
+        logger.info("Gerando Briefing de Fechamento do Dia...")
+        result = agent.generate_end_of_day_briefing()
+        if result.get("status") == "generated":
+            logger.info(
+                f"Briefing gerado com sucesso: {result.get('length', 0)} chars | "
+                f"Data: {result.get('date', '-')}"
+            )
+        else:
+            logger.warning(f"Briefing nao foi gerado: {result}")
+    finally:
+        agent.shutdown()
+
+
+def run_news_now() -> None:
+    """Coleta noticias RSS agora e salva na memoria (sem esperar o scheduler)."""
+    agent = MacroeconomistAgent(enable_scheduler=False)
+    try:
+        logger.info("Coletando noticias agora...")
+        result = agent.collect_and_store_news()
+        stored = result.get("stored", 0)
+        dupes = result.get("duplicates", 0)
+        logger.info(f"Noticias coletadas: {stored} novas, {dupes} duplicatas ignoradas")
+        if result.get("error"):
+            logger.warning(f"Aviso: {result['error']}")
     finally:
         agent.shutdown()
 
@@ -389,7 +675,7 @@ def run_scheduler() -> None:
 def telegram_test() -> None:
     try:
         notifier = TelegramNotifier()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         notifier.send_message(f"Teste do BotMacroeconomist em {now}")
         logger.info("Mensagem de teste enviada para o Telegram")
     except Exception as e:
@@ -412,43 +698,8 @@ def telegram_chat_id() -> None:
 
 
 def serve_telegram(agent: MacroeconomistAgent) -> None:
-    notifier = TelegramNotifier()
-    offset = None
-
     try:
-        if not notifier.can_discover_chat_id():
-            logger.error("Telegram nao configurado. Defina TELEGRAM_BOT_TOKEN no arquivo .env")
-            return
-
-        logger.info("Escutando mensagens do Telegram via polling...")
-        logger.info("Envie uma mensagem para o bot no Telegram. Para parar localmente, use Ctrl+C.")
-
-        while True:
-            updates = notifier.get_updates(offset=offset, timeout=30)
-            for update in updates:
-                offset = update.get("update_id", 0) + 1
-                message = update.get("message") or update.get("channel_post")
-                if not message:
-                    continue
-
-                chat = message.get("chat", {})
-                chat_id = chat.get("id")
-                text = (message.get("text") or "").strip()
-                message_id = message.get("message_id")
-
-                if not chat_id or not text:
-                    continue
-
-                logger.info(f"Mensagem recebida do Telegram em chat {chat_id}: {text}")
-                reply = agent.answer_telegram_message(text, chat_id=str(chat_id))
-                notifier.send_long_message_to_chat(
-                    chat_id=str(chat_id),
-                    text=reply,
-                    reply_to_message_id=message_id,
-                )
-                logger.info(f"Resposta enviada para chat {chat_id}")
-    except KeyboardInterrupt:
-        logger.info("Escuta do Telegram encerrada")
+        start_telegram_bot(Path(__file__).resolve().parent, agent=agent)
     except Exception as e:
         logger.error(f"Erro na escuta do Telegram: {str(e)}")
 
@@ -463,12 +714,22 @@ def telegram_listen() -> None:
 
 def run_start() -> None:
     logger.info("Iniciando modo completo: scheduler, memoria e Telegram...")
+    base_dir = Path(__file__).resolve().parent
     agent = MacroeconomistAgent(enable_scheduler=True)
 
     try:
+        ensure_startup_pipelines(base_dir)
         serve_telegram(agent)
     except KeyboardInterrupt:
         logger.info("Encerramento solicitado")
+    except Exception as e:
+        logger.warning(f"Telegram indisponivel no momento, mas o projeto continuara rodando: {str(e)}")
+        logger.info("Scheduler e memoria seguem ativos. Use Ctrl+C para encerrar.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Encerramento solicitado")
     finally:
         agent.shutdown()
 
@@ -484,14 +745,34 @@ def print_help() -> None:
                 "  python main.py learning",
                 "  python main.py ask <pergunta>",
                 "  python main.py chat",
+                "  python main.py macro-chat",
                 "  python main.py telegram-listen",
                 "  python main.py learn-now",
                 "  python main.py collect-articles",
                 "  python main.py daily-thesis",
+                "  python main.py bootstrap-learning",
+                "  python main.py bootstrap-assets",
+                "  python main.py learning-catalog",
+                "  python main.py daily",
+                "  python main.py weekly",
+                "  python main.py editorial-learn",
+                "  python main.py full-cycle",
+                "  python main.py topic <tema>",
+                "  python main.py ingest [--text ... --url ... --fact ... --source ... --topic ...]",
+                "  python main.py tracked-profiles",
+                "  python main.py x-drafts",
+                "  python main.py x-schedule",
+                "  python main.py x-tomorrow",
+                "  python main.py x-check",
+                "  python main.py newsletter-preview",
+                "  python main.py newsletter-draft",
+                "  python main.py telegram-editorial",
                 "  python main.py thesis <tema>",
                 "  python main.py source-demo",
                 "  python main.py rss <feed_url> [source_name]",
                 "  python main.py daily-digest",
+                "  python main.py briefing         # Briefing de fechamento do dia (22h BRT)",
+                "  python main.py news-now          # Coleta noticias RSS agora",
                 "  python main.py report",
                 "  python main.py status",
                 "  python main.py run",
@@ -522,6 +803,8 @@ def main() -> None:
         run_ask(question)
     elif command == "chat":
         run_chat()
+    elif command in {"macro-chat", "macrochat", "consultor"}:
+        run_macro_chat()
     elif command == "telegram-listen":
         telegram_listen()
     elif command == "learn-now":
@@ -530,6 +813,44 @@ def main() -> None:
         run_collect_articles()
     elif command == "daily-thesis":
         run_daily_thesis()
+    elif command == "bootstrap-learning":
+        run_bootstrap_learning()
+    elif command == "bootstrap-assets":
+        run_bootstrap_assets()
+    elif command == "learning-catalog":
+        run_learning_catalog()
+    elif command == "daily":
+        run_editorial_daily()
+    elif command == "weekly":
+        run_editorial_weekly()
+    elif command == "editorial-learn":
+        run_editorial_learning()
+    elif command == "full-cycle":
+        run_full_cycle()
+    elif command == "topic":
+        topic = " ".join(command_args).strip()
+        if not topic:
+            print_help()
+            return
+        run_editorial_topic(topic)
+    elif command == "ingest":
+        run_editorial_ingest(command_args)
+    elif command == "tracked-profiles":
+        run_tracked_profiles()
+    elif command == "x-drafts":
+        run_x_drafts_preview()
+    elif command == "x-schedule":
+        run_x_schedule()
+    elif command == "x-tomorrow":
+        run_x_tomorrow()
+    elif command == "x-check":
+        run_x_check()
+    elif command == "newsletter-preview":
+        run_newsletter_preview()
+    elif command == "newsletter-draft":
+        run_newsletter_draft()
+    elif command == "telegram-editorial":
+        run_editorial_telegram()
     elif command == "source-demo":
         run_source_demo()
     elif command == "thesis":
@@ -544,6 +865,10 @@ def main() -> None:
         run_rss(feed_url, source_name)
     elif command == "daily-digest":
         run_daily_digest()
+    elif command == "briefing":
+        run_briefing()
+    elif command == "news-now":
+        run_news_now()
     elif command == "report":
         run_report()
     elif command == "status":

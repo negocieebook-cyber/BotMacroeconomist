@@ -1,0 +1,100 @@
+news:
+- KobeissiLetter
+- beincrypto
+- globalmarketss
+- Barchart
+- leiatheinvestor
+- Forbes
+- GlobeEyeNews
+- NoLimitGains
+- Kalshi
+- WatcherGuru
+macro_specialists:
+- GabrielD_Ouro
+- PeterLBrandt
+- igor_mundstock
+- TedPillows
+- jpmayall
+- intocryptoverse
+- QCompounding
+- JesseCohenInv
+- cadeinvests
+- fernandoulrich
+- ducavendish
+- AltCryptoGems
+- BrianFeroldi
+reference_style:
+- AlexHormozi
+blacklist:
+- copied_threads
+- generic_engagement_farming
+metadata:
+  KobeissiLetter:
+    url: https://x.com/KobeissiLetter
+    role: noticias
+  GabrielD_Ouro:
+    url: https://x.com/GabrielD_Ouro
+    role: macro
+  PeterLBrandt:
+    url: https://x.com/PeterLBrandt
+    role: macro
+  igor_mundstock:
+    url: https://x.com/igor_mundstock
+    role: macro
+  TedPillows:
+    url: https://x.com/TedPillows
+    role: macro
+  beincrypto:
+    url: https://x.com/beincrypto
+    role: noticias
+  globalmarketss:
+    url: https://x.com/globalmarketss
+    role: noticias
+  jpmayall:
+    url: https://x.com/jpmayall
+    role: macro
+  Barchart:
+    url: https://x.com/Barchart
+    role: noticias
+  intocryptoverse:
+    url: https://x.com/intocryptoverse
+    role: macro
+  QCompounding:
+    url: https://x.com/QCompounding
+    role: macro
+  JesseCohenInv:
+    url: https://x.com/JesseCohenInv
+    role: macro
+  cadeinvests:
+    url: https://x.com/cadeinvests
+    role: macro
+  leiatheinvestor:
+    url: https://x.com/leiatheinvestor
+    role: noticias
+  fernandoulrich:
+    url: https://x.com/fernandoulrich
+    role: macro
+  ducavendish:
+    url: https://x.com/ducavendish
+    role: macro
+  AltCryptoGems:
+    url: https://x.com/AltCryptoGems
+    role: macro
+  BrianFeroldi:
+    url: https://x.com/BrianFeroldi
+    role: macro
+  Forbes:
+    url: https://x.com/Forbes
+    role: noticias
+  GlobeEyeNews:
+    url: https://x.com/GlobeEyeNews
+    role: noticias
+  NoLimitGains:
+    url: https://x.com/NoLimitGains
+    role: noticias
+  Kalshi:
+    url: https://x.com/Kalshi
+    role: noticias
+  WatcherGuru:
+    url: https://x.com/WatcherGuru
+    role: noticias

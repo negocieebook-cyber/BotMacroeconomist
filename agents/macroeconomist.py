@@ -5,7 +5,8 @@ Versao simplificada para manter o projeto funcional e facil de entender.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List
 
 from apis.bis_api import BISClient
@@ -27,14 +28,18 @@ from config import (
     DAILY_THESIS_TOPIC,
     DEFAULT_RESEARCH_FEEDS,
     ENABLE_TELEGRAM_NOTIFICATIONS,
+    END_OF_DAY_BRIEFING_HOUR_UTC,
+    END_OF_DAY_BRIEFING_MINUTE_UTC,
     FRED_API_KEY,
     LOG_FILE,
     LOG_LEVEL,
+    NEWS_COLLECTION_HOURS_UTC,
     RESEARCH_FEED_LIMIT,
 )
 from memory.chromadb_manager import ChromaDBManager, MemoryAnalyzer
 from scheduler.weekly_schedule import TaskManager, WeeklyScheduler
 from utils import (
+    MacroLLMClient,
     TelegramNotifier,
     build_daily_learning_digest,
     get_macro_learning_cards,
@@ -47,8 +52,11 @@ logger = logging.getLogger(__name__)
 class MacroeconomistAgent:
     """Agente principal com coleta, memoria e scheduler."""
 
-    def __init__(self, enable_scheduler: bool = True):
+    def __init__(self, enable_scheduler: bool = True, quiet_console: bool = False):
         setup_logger(LOG_LEVEL, LOG_FILE)
+        if quiet_console:
+            self._quiet_console_logging()
+
         self.enable_scheduler = enable_scheduler
 
         logger.info("=" * 60)
@@ -73,15 +81,26 @@ class MacroeconomistAgent:
         self.scheduler = WeeklyScheduler()
         self.task_manager = TaskManager()
         self.conversations: Dict[str, List[Dict[str, str]]] = {}
+        self.llm = MacroLLMClient()
+        self.live_refresh_state: Dict[str, str] = {}
+        self.notifier = TelegramNotifier() if ENABLE_TELEGRAM_NOTIFICATIONS else None
+
+        # Garante aprendizado do dia em QUALQUER modo de execucao
+        self._ensure_daily_knowledge()
 
         if enable_scheduler:
             self._setup_schedule()
             self.scheduler.start()
-            self.ensure_daily_learning()
-            self.ensure_daily_research_articles()
-            self.ensure_daily_thesis()
+
 
         logger.info("Agente pronto")
+
+    def _quiet_console_logging(self) -> None:
+        """Mantem logs em arquivo, mas deixa o terminal livre para o modo chat."""
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                handler.setLevel(logging.CRITICAL + 1)
 
     def monday_inflation_policy(self) -> Dict:
         logger.info("SEGUNDA: Inflacao e politica monetaria")
@@ -192,7 +211,7 @@ class MacroeconomistAgent:
 
         return {
             "indicator": indicator_name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "historical_data": search_result,
             "insights": self._generate_insights(search_result),
         }
@@ -204,7 +223,7 @@ class MacroeconomistAgent:
             "query": query,
             "results_count": len(results["results"]),
             "results": results["results"],
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def answer_learning_question(
@@ -218,18 +237,30 @@ class MacroeconomistAgent:
         if not normalized_question:
             return {
                 "question": question,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "answer": "Faca uma pergunta sobre o que o bot aprendeu, por exemplo: o que voce aprendeu hoje sobre inflacao?",
                 "results_count": 0,
                 "sources": [],
             }
 
         conversation = self.conversations.setdefault(session_id, [])
+        small_talk_answer = self._answer_small_talk(normalized_question, conversation)
+        if small_talk_answer:
+            response = {
+                "question": normalized_question,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "answer": small_talk_answer,
+                "results_count": 0,
+                "sources": [],
+            }
+            self._remember_turn(session_id, normalized_question, small_talk_answer)
+            return response
+
         direct_answer = self._answer_meta_question(normalized_question, conversation)
         if direct_answer:
             response = {
                 "question": normalized_question,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "answer": direct_answer,
                 "results_count": 0,
                 "sources": [],
@@ -241,7 +272,7 @@ class MacroeconomistAgent:
         if action_answer:
             response = {
                 "question": normalized_question,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "answer": action_answer,
                 "results_count": 0,
                 "sources": [],
@@ -249,22 +280,26 @@ class MacroeconomistAgent:
             self._remember_turn(session_id, normalized_question, action_answer)
             return response
 
+        self._maybe_refresh_context_for_question(normalized_question)
         search_question = self._build_contextual_question(normalized_question, conversation)
 
         lowered = search_question.lower()
         if "hoje" in lowered and any(
             token in lowered for token in ["aprendeu", "aprendizado", "aprendeu hoje", "o que sabe"]
         ):
-            today = datetime.utcnow().date().isoformat()
+            today = datetime.now(timezone.utc).date().isoformat()
             documents = self.memory.get_documents_for_date(today)
             sources = self._build_chat_sources(documents[:n_results], search_question)
-            if self._is_priority_question(lowered):
+            llm_answer = self.llm.answer_question(normalized_question, sources, conversation) if self.llm.is_available() else ""
+            if llm_answer:
+                answer = llm_answer
+            elif self._is_priority_question(lowered):
                 answer = self._build_priority_answer(sources, normalized_question)
             else:
                 answer = self._build_daily_learning_answer(today, sources, normalized_question)
             response = {
                 "question": normalized_question,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "answer": answer,
                 "results_count": len(sources),
                 "sources": sources,
@@ -274,20 +309,103 @@ class MacroeconomistAgent:
 
         results = self.memory.search(search_question, n_results=n_results)
         sources = self._build_chat_sources(results.get("results", []), search_question)
-        if self._is_priority_question(lowered):
+        llm_answer = self.llm.answer_question(normalized_question, sources, conversation) if self.llm.is_available() else ""
+        if llm_answer:
+            answer = llm_answer
+        elif self._is_priority_question(lowered):
             answer = self._build_priority_answer(sources, normalized_question)
         else:
             answer = self._build_learning_answer(normalized_question, sources, conversation)
 
         response = {
             "question": normalized_question,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "answer": answer,
             "results_count": len(sources),
             "sources": sources,
         }
         self._remember_turn(session_id, normalized_question, answer)
         return response
+
+    def answer_macro_consultant_question(
+        self,
+        question: str,
+        n_results: int = 6,
+        session_id: str = "macro_consultant",
+    ) -> Dict:
+        """Conversa em modo consultor senior, explicando o processo de aprendizado macro."""
+        normalized_question = (question or "").strip()
+        if not normalized_question:
+            return {
+                "question": question,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "answer": "Me pergunta sobre o processo, por exemplo: 'o que voce esta aprendendo e por que isso importa?'",
+                "results_count": 0,
+                "sources": [],
+            }
+
+        conversation = self.conversations.setdefault(session_id, [])
+        small_talk_answer = self._answer_macro_small_talk(normalized_question, conversation)
+        if small_talk_answer:
+            self._remember_turn(session_id, normalized_question, small_talk_answer)
+            return {
+                "question": normalized_question,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "answer": small_talk_answer,
+                "results_count": 0,
+                "sources": [],
+            }
+
+        action_answer = self._answer_conversation_action(normalized_question, conversation)
+        if action_answer:
+            self._remember_turn(session_id, normalized_question, action_answer)
+            return {
+                "question": normalized_question,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "answer": action_answer,
+                "results_count": 0,
+                "sources": [],
+            }
+
+        self._maybe_refresh_context_for_question(normalized_question)
+        search_question = self._build_contextual_question(normalized_question, conversation)
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        today_docs = self.memory.get_documents_for_date(today)
+        search_results = self.memory.search(search_question, n_results=n_results).get("results", [])
+
+        combined = []
+        seen_ids = set()
+        for item in today_docs + search_results:
+            item_id = item.get("id") or str(item.get("metadata", {}))[:120]
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            combined.append(item)
+
+        sources = self._build_chat_sources(combined[:n_results], search_question)
+        answer = ""
+        if self.llm.is_available():
+            consultant_question = (
+                f"{normalized_question}\n\n"
+                "Responda como o melhor macroeconomista do mundo para um cliente inteligente, "
+                "mas sem jargao desnecessario. Explique: 1) o que voce esta aprendendo, "
+                "2) por que isso importa para o regime macro, 3) qual tese provisoria nasce disso, "
+                "4) qual dado poderia mudar sua opiniao. Seja direto e cite a base usada."
+            )
+            answer = self.llm.answer_question(consultant_question, sources, conversation)
+
+        if not answer:
+            answer = self._build_macro_consultant_answer(normalized_question, sources, today)
+
+        self._remember_turn(session_id, normalized_question, answer)
+        return {
+            "question": normalized_question,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "answer": answer,
+            "results_count": len(sources),
+            "sources": sources,
+        }
 
     def ingest_source_document(
         self,
@@ -312,7 +430,7 @@ class MacroeconomistAgent:
         text = (
             f"Fonte: {source_name}\n"
             f"Titulo: {title}\n"
-            f"Publicado em: {published_at or datetime.utcnow().isoformat()}\n"
+            f"Publicado em: {published_at or datetime.now(timezone.utc).isoformat()}\n"
             f"URL: {url}\n"
             f"Tags: {', '.join(tags)}\n\n"
             f"{content}"
@@ -320,12 +438,12 @@ class MacroeconomistAgent:
         metadata = {
             "api": "SOURCE_DOC",
             "focus_area": "Source_Based_Research",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "source_article",
             "title": title,
             "source_name": source_name,
             "url": url,
-            "published_at": published_at or datetime.utcnow().isoformat(),
+            "published_at": published_at or datetime.now(timezone.utc).isoformat(),
             "tags": ", ".join(tags),
         }
 
@@ -359,6 +477,15 @@ class MacroeconomistAgent:
 
         combined_memory = technical + market_memory
         thesis = self.thesis_engine.build_thesis(topic, combined_memory, source_results)
+
+        if self.llm.is_available():
+            llm_thesis = self.llm.build_thesis(topic, combined_memory, source_results)
+            if llm_thesis:
+                thesis["thesis"] = llm_thesis.get("thesis", thesis.get("thesis", ""))
+                thesis["evidence"] = llm_thesis.get("evidence", thesis.get("evidence", []))
+                thesis["risks"] = llm_thesis.get("risks", thesis.get("risks", []))
+                thesis["confidence"] = llm_thesis.get("confidence", "")
+
         thesis["technical_results"] = len(technical)
         thesis["market_results"] = len(market_memory)
         return thesis
@@ -397,7 +524,7 @@ class MacroeconomistAgent:
     def collect_daily_research_articles(self) -> Dict:
         """Ingere artigos dos feeds configurados para manter o agente atualizado diariamente."""
         summary = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "feeds_processed": 0,
             "articles_stored": 0,
             "duplicates": 0,
@@ -437,7 +564,7 @@ class MacroeconomistAgent:
 
     def ensure_daily_research_articles(self) -> Dict:
         """Garante que haja artigos ingeridos no dia atual."""
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         if self.memory.has_document_for_date(today, metadata_type="source_article"):
             logger.info("Artigos do dia ja presentes na memoria")
             return {"status": "already_collected", "date": today}
@@ -453,7 +580,7 @@ class MacroeconomistAgent:
 
     def generate_daily_thesis(self, topic: str = DAILY_THESIS_TOPIC, n_results: int = 5) -> Dict:
         """Gera a tese diaria, salva na memoria e envia ao Telegram."""
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
 
         if self.memory.has_document_for_date(today, metadata_type="daily_thesis"):
             logger.info("Tese diaria ja registrada hoje")
@@ -471,7 +598,7 @@ class MacroeconomistAgent:
         metadata = {
             "api": "THESIS_ENGINE",
             "focus_area": "Daily_Thesis",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "daily_thesis",
             "title": thesis.get("topic", topic),
             "topic": topic,
@@ -499,7 +626,7 @@ class MacroeconomistAgent:
 
     def get_agent_status(self) -> Dict:
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "memory": self.memory.get_collection_stats(),
             "scheduler": self.scheduler.get_jobs(),
             "task_stats": self.task_manager.get_stats(),
@@ -518,18 +645,18 @@ class MacroeconomistAgent:
         recent_documents = self.memory.get_recent_documents(limit=limit)
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "memory": self.memory.get_collection_stats(),
             "recent_documents": recent_documents,
         }
 
     def get_daily_learning_snapshot(self, date_str: str = None) -> Dict:
         """Retorna os aprendizados armazenados em uma data especifica UTC."""
-        date_str = date_str or datetime.utcnow().date().isoformat()
+        date_str = date_str or datetime.now(timezone.utc).date().isoformat()
         documents = self.memory.get_documents_for_date(date_str)
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "date": date_str,
             "memory": self.memory.get_collection_stats(),
             "documents": documents,
@@ -537,27 +664,84 @@ class MacroeconomistAgent:
 
     def send_daily_learning_digest(self) -> None:
         """Envia ao Telegram um resumo do que o agente aprendeu no dia."""
-        if not ENABLE_TELEGRAM_NOTIFICATIONS:
+        if not ENABLE_TELEGRAM_NOTIFICATIONS or not self.notifier:
             logger.info("Digest diario desativado: Telegram desligado")
             return
 
         try:
             snapshot = self.get_daily_learning_snapshot()
             message = build_daily_learning_digest(snapshot)
-            notifier = TelegramNotifier()
-            notifier.send_long_message(message)
+            self.notifier.send_long_message(message)
             logger.info("Digest diario enviado para o Telegram")
         except Exception as e:
             logger.warning(f"Nao foi possivel enviar digest diario: {str(e)}")
 
     def answer_telegram_message(self, message_text: str, chat_id: str = "telegram") -> str:
-        """Gera uma resposta curta para conversa via Telegram."""
-        response = self.answer_learning_question(message_text, n_results=5, session_id=chat_id)
-        return response.get("answer", "Nao consegui montar uma resposta agora.")
+        """
+        Gera uma resposta como macroeconomista para conversa livre via Telegram.
+        Injeta automaticamente dados de mercado em tempo real e notícias recentes.
+        """
+        # Busca contexto na memória ChromaDB
+        response = self.answer_learning_question(message_text, n_results=6, session_id=chat_id)
+        sources = response.get("sources", [])
+        conversation = self.conversations.get(chat_id, [])
+
+        # Se LLM disponível, usa persona rica com dados em tempo real
+        if self.llm.is_available():
+            market_ctx = self._get_live_market_context()
+            news_ctx = self._get_live_news_context()
+
+            rich_answer = self.llm.answer_question(
+                question=message_text,
+                sources=sources,
+                conversation=conversation,
+                market_context=market_ctx,
+                news_context=news_ctx,
+            )
+            if rich_answer:
+                self._remember_turn(chat_id, message_text, rich_answer)
+                return rich_answer
+
+        return response.get("answer", "Não consegui montar uma resposta agora.")
+
+    def _get_live_market_context(self) -> str:
+        """Busca cotações em tempo real como texto para injetar no LLM."""
+        try:
+            from apis.market_api import MarketDataClient, DEFAULT_ASSETS
+            client = MarketDataClient()
+            snapshot = client.get_market_snapshot()
+            quotes = snapshot.get("quotes", {})
+            lines = []
+            for ticker, meta in DEFAULT_ASSETS.items():
+                q = quotes.get(ticker, {})
+                if "price" not in q:
+                    continue
+                price = q["price"]
+                chg = q.get("change_pct")
+                chg_str = (
+                    f" ({'+' if chg and chg >= 0 else ''}{chg:.2f}%)"
+                    if chg is not None else ""
+                )
+                prefix = meta.get("prefix", "")
+                lines.append(f"{meta['label']}: {prefix} {price}{chg_str}")
+            return "\n".join(lines) if lines else "Mercado indisponível."
+        except Exception as exc:
+            logger.debug(f"Mercado indisponível para contexto LLM: {exc}")
+            return ""
+
+    def _get_live_news_context(self) -> str:
+        """Busca notícias recentes como texto para injetar no LLM."""
+        try:
+            from apis.news_api import NewsCollector
+            collector = NewsCollector()
+            return collector.format_news_for_context(limit=5)
+        except Exception as exc:
+            logger.debug(f"Notícias indisponíveis para contexto LLM: {exc}")
+            return ""
 
     def learn_daily_technical_content(self) -> Dict:
         """Armazena um card tecnico diario na memoria do agente."""
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         focus_area = "Daily_Technical_Learning"
 
         if self.memory.has_document_for_date(
@@ -573,7 +757,7 @@ class MacroeconomistAgent:
             logger.warning("Biblioteca tecnica vazia; nenhum aprendizado diario registrado")
             return {"status": "no_cards", "date": today}
 
-        day_index = datetime.utcnow().toordinal() % len(cards)
+        day_index = datetime.now(timezone.utc).toordinal() % len(cards)
         card = cards[day_index]
 
         text = (
@@ -586,7 +770,7 @@ class MacroeconomistAgent:
         metadata = {
             "api": "MACRO_LIBRARY",
             "focus_area": focus_area,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "technical_learning",
             "domain": card["domain"],
             "title": card["title"],
@@ -609,6 +793,150 @@ class MacroeconomistAgent:
         except Exception as e:
             logger.warning(f"Nao foi possivel garantir aprendizado diario: {str(e)}")
             return {"status": "failed", "error": str(e)}
+
+    def ensure_daily_news(self) -> Dict:
+        """Garante que noticias foram coletadas hoje."""
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self.memory.has_document_for_date(today, metadata_type="news_insight"):
+            logger.info("Noticias do dia ja presentes na memoria")
+            return {"status": "already_collected", "date": today}
+        try:
+            result = self.collect_and_store_news()
+            result["status"] = "collected"
+            result["date"] = today
+            return result
+        except Exception as e:
+            logger.warning(f"Nao foi possivel garantir noticias diarias: {str(e)}")
+            return {"status": "failed", "date": today, "error": str(e)}
+
+    def _ensure_daily_knowledge(self) -> None:
+        """
+        Chamado ao iniciar o agente em qualquer modo.
+        Verifica e preenche tudo que falta do dia:
+          - Aprendizado tecnico
+          - Noticias RSS
+          - Artigos de pesquisa
+          - Tese do dia
+        Executa silenciosamente — falhas nao interrompem a inicializacao.
+        """
+        logger.info("Verificando aprendizados do dia...")
+        try:
+            self.ensure_daily_learning()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_learning falhou: {exc}")
+        try:
+            self.ensure_daily_news()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_news falhou: {exc}")
+        try:
+            self.ensure_daily_research_articles()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_research_articles falhou: {exc}")
+        try:
+            self.ensure_daily_thesis()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_thesis falhou: {exc}")
+        logger.info("Verificacao de aprendizados concluida")
+
+    def collect_and_store_news(self) -> Dict:
+        """
+        Coleta notícias dos feeds RSS e salva no ChromaDB como 'news_insight'.
+        É chamada 3x ao dia pelo scheduler para manter o agente atualizado.
+        """
+        try:
+            from apis.news_api import NewsCollector
+            collector = NewsCollector()
+            articles = collector.fetch_latest(limit_per_feed=5)
+
+            stored = 0
+            duplicates = 0
+            for article in articles:
+                title = article.get("title", "")
+                url = article.get("url", "")
+                if not title:
+                    continue
+
+                # Deduplicação
+                if self.memory.has_source_document(url=url, title=title):
+                    duplicates += 1
+                    continue
+
+                source = article.get("source", "RSS")
+                summary = article.get("summary", "")
+                published_at = article.get("published_at", "")
+
+                text = (
+                    f"Notícia: {title}\n"
+                    f"Fonte: {source}\n"
+                    f"Publicado em: {published_at}\n"
+                    f"URL: {url}\n\n"
+                    f"{summary}"
+                )
+                metadata = {
+                    "api": "NEWS_RSS",
+                    "focus_area": "Daily_News",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "type": "news_insight",
+                    "title": title,
+                    "source_name": source,
+                    "url": url,
+                    "published_at": published_at,
+                }
+                self.memory.add_data([text], [metadata])
+                stored += 1
+
+            logger.info(f"Notícias coletadas: {stored} salvas, {duplicates} duplicatas")
+            return {"stored": stored, "duplicates": duplicates, "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as exc:
+            logger.warning(f"Falha na coleta de notícias: {exc}")
+            return {"stored": 0, "duplicates": 0, "error": str(exc)}
+
+    def generate_end_of_day_briefing(self) -> Dict:
+        """
+        Gera o Briefing de Fechamento do Dia (22:00 BRT).
+        Consolida mercados, notícias, dados, aprendizado, tese e riscos.
+        Envia ao Telegram e inclui sugestão de post para o X.
+        """
+        try:
+            base_dir = Path(__file__).resolve().parents[1]
+            try:
+                from scheduler.daily_jobs import run_content_generation_pipeline
+
+                run_content_generation_pipeline(base_dir, send_telegram=False)
+            except Exception as exc:
+                logger.warning(f"Nao foi possivel atualizar drafts do X antes do briefing: {exc}")
+
+            from agents.daily_briefing import DailyBriefingBuilder
+            builder = DailyBriefingBuilder(memory=self.memory, llm=self.llm, base_dir=base_dir)
+            briefing_text = builder.build()
+
+            logger.info("Briefing de fechamento do dia gerado")
+
+            # Salvar na memória para histórico
+            today = datetime.now(timezone.utc).date().isoformat()
+            self.memory.add_data(
+                [briefing_text],
+                [{
+                    "api": "DAILY_BRIEFING",
+                    "focus_area": "End_Of_Day_Briefing",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "type": "daily_briefing",
+                    "title": f"Briefing {today}",
+                }]
+            )
+
+            # Enviar ao Telegram
+            if ENABLE_TELEGRAM_NOTIFICATIONS and self.notifier:
+                try:
+                    self.notifier.send_long_message(briefing_text)
+                    logger.info("Briefing de fechamento enviado ao Telegram")
+                except Exception as exc:
+                    logger.warning(f"Falha ao enviar briefing ao Telegram: {exc}")
+
+            return {"status": "generated", "date": today, "length": len(briefing_text)}
+        except Exception as exc:
+            logger.error(f"Erro ao gerar briefing de fechamento: {exc}")
+            return {"status": "failed", "error": str(exc)}
 
     def _setup_schedule(self) -> None:
         self.scheduler.schedule_task("Monday Inflation", self.monday_inflation_policy, "monday", 14)
@@ -634,6 +962,24 @@ class MacroeconomistAgent:
             DAILY_THESIS_HOUR_UTC,
             DAILY_THESIS_MINUTE_UTC,
         )
+
+        # Coleta de noticias 3x ao dia (09:00, 13:00, 18:00 BRT = 12:00, 16:00, 21:00 UTC)
+        for hour_utc in NEWS_COLLECTION_HOURS_UTC:
+            self.scheduler.schedule_daily_task(
+                f"News Collection {hour_utc:02d}h UTC",
+                self.collect_and_store_news,
+                hour_utc,
+                0,
+            )
+
+        # Briefing de fechamento do dia (22:00 BRT = 01:00 UTC do dia seguinte)
+        self.scheduler.schedule_daily_task(
+            "End of Day Briefing",
+            self.generate_end_of_day_briefing,
+            END_OF_DAY_BRIEFING_HOUR_UTC,
+            END_OF_DAY_BRIEFING_MINUTE_UTC,
+        )
+
         if ENABLE_TELEGRAM_NOTIFICATIONS:
             self.scheduler.schedule_daily_task(
                 "Daily Learning Digest",
@@ -641,6 +987,7 @@ class MacroeconomistAgent:
                 DAILY_DIGEST_HOUR_UTC,
                 DAILY_DIGEST_MINUTE_UTC,
             )
+
 
     def _store_in_memory(self, data: Dict, api_source: str, focus_area: str) -> None:
         try:
@@ -651,7 +998,7 @@ class MacroeconomistAgent:
             metadata = {
                 "api": api_source,
                 "focus_area": focus_area,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "type": "market_data",
             }
 
@@ -671,11 +1018,10 @@ class MacroeconomistAgent:
 
     def _notify_learning(self, focus_area: str, api_source: str, data: Dict) -> None:
         """Envia um resumo curto ao Telegram quando a coleta automatica aprende algo novo."""
-        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS:
+        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS or not self.notifier:
             return
 
         try:
-            notifier = TelegramNotifier()
             top_level_keys = list(data.keys())[:6] if isinstance(data, dict) else []
             memory_docs = self.memory.get_collection_stats().get("total_documents", 0)
 
@@ -683,44 +1029,42 @@ class MacroeconomistAgent:
                 "Novo aprendizado do agente",
                 f"Foco: {focus_area}",
                 f"API: {api_source}",
-                f"Horario: {datetime.utcnow().isoformat()}",
+                f"Horario: {datetime.now(timezone.utc).isoformat()}",
                 f"Blocos coletados: {', '.join(top_level_keys) if top_level_keys else 'nenhum'}",
                 f"Documentos totais na memoria: {memory_docs}",
             ]
 
-            notifier.send_long_message("\n".join(lines))
+            self.notifier.send_long_message("\n".join(lines))
             logger.info(f"Notificacao de aprendizado enviada: {focus_area}")
         except Exception as e:
             logger.warning(f"Nao foi possivel enviar notificacao de aprendizado: {str(e)}")
 
     def _notify_technical_learning(self, card: Dict) -> None:
         """Envia ao Telegram o aprendizado tecnico diario."""
-        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS:
+        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS or not self.notifier:
             return
 
         try:
-            notifier = TelegramNotifier()
             message = "\n".join(
                 [
                     "Novo aprendizado tecnico do agente",
                     f"Dominio: {card.get('domain', 'Macro')}",
                     f"Tema: {card.get('title', '-')}",
-                    f"Horario: {datetime.utcnow().isoformat()}",
+                    f"Horario: {datetime.now(timezone.utc).isoformat()}",
                     f"Resumo: {card.get('content', '')[:700]}",
                 ]
             )
-            notifier.send_long_message(message)
+            self.notifier.send_long_message(message)
             logger.info(f"Notificacao de aprendizado tecnico enviada: {card.get('title', '-')}")
         except Exception as e:
             logger.warning(f"Nao foi possivel enviar aprendizado tecnico ao Telegram: {str(e)}")
 
     def _notify_research_ingestion(self, summary: Dict) -> None:
         """Envia um resumo da ingestao diaria de artigos."""
-        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS:
+        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS or not self.notifier:
             return
 
         try:
-            notifier = TelegramNotifier()
             lines = [
                 "Nova coleta diaria de artigos",
                 f"Horario: {summary.get('timestamp', '-')}",
@@ -734,18 +1078,17 @@ class MacroeconomistAgent:
                     f"- {feed.get('source_name', 'Feed')}: {feed.get('stored_count', 0)} novo(s)"
                 )
 
-            notifier.send_long_message("\n".join(lines))
+            self.notifier.send_long_message("\n".join(lines))
             logger.info("Notificacao de coleta diaria de artigos enviada")
         except Exception as e:
             logger.warning(f"Nao foi possivel enviar resumo de artigos ao Telegram: {str(e)}")
 
     def _notify_daily_thesis(self, thesis: Dict) -> None:
         """Envia a tese diaria ao Telegram."""
-        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS:
+        if not self.enable_scheduler or not ENABLE_TELEGRAM_NOTIFICATIONS or not self.notifier:
             return
 
         try:
-            notifier = TelegramNotifier()
             lines = [
                 "Tese diaria do agente",
                 f"Tema: {thesis.get('topic', '-')}",
@@ -767,7 +1110,7 @@ class MacroeconomistAgent:
                         f"- {citation.get('title', 'Sem titulo')} | {citation.get('source', 'fonte')} | {citation.get('url', '')}"
                     )
 
-            notifier.send_long_message("\n".join(lines))
+            self.notifier.send_long_message("\n".join(lines))
             logger.info("Tese diaria enviada ao Telegram")
         except Exception as e:
             logger.warning(f"Nao foi possivel enviar tese diaria ao Telegram: {str(e)}")
@@ -775,7 +1118,35 @@ class MacroeconomistAgent:
     def shutdown(self) -> None:
         logger.info("Encerrando agente...")
         self.scheduler.stop()
+        self.memory.close()
         logger.info("Agente encerrado")
+
+    def _maybe_refresh_context_for_question(self, question: str) -> None:
+        lowered = (question or "").lower()
+        today = datetime.now(timezone.utc).date().isoformat()
+
+        refresh_plan = []
+        if any(token in lowered for token in ["inflacao", "infla", "cpi", "pce", "fed", "juros"]):
+            refresh_plan.append(("inflation_policy", self.monday_inflation_policy))
+        if any(token in lowered for token in ["crescimento", "pib", "gdp", "atividade"]):
+            refresh_plan.append(("economic_growth", self.tuesday_economic_growth))
+        if any(token in lowered for token in ["emprego", "trabalho", "payroll", "desemprego"]):
+            refresh_plan.append(("labor_market", self.wednesday_labor_market))
+        if any(token in lowered for token in ["credito", "balanca", "balanca", "comercio", "derivativos", "finance"]):
+            refresh_plan.append(("trade_finance", self.thursday_trade_finance))
+        if any(token in lowered for token in ["previsao", "forecast", "consensus", "ocde", "oecd"]):
+            refresh_plan.append(("forecasts", self.friday_forecasts_consensus))
+        if any(token in lowered for token in ["artigo", "artigos", "noticia", "noticias", "fonte", "fontes", "pesquisa", "research", "tese"]):
+            refresh_plan.append(("daily_research", self.ensure_daily_research_articles))
+
+        for refresh_key, refresh_func in refresh_plan:
+            if self.live_refresh_state.get(refresh_key) == today:
+                continue
+            try:
+                refresh_func()
+                self.live_refresh_state[refresh_key] = today
+            except Exception as exc:
+                logger.warning(f"Nao foi possivel atualizar contexto '{refresh_key}': {exc}")
 
     def _build_learning_answer(
         self,
@@ -846,6 +1217,72 @@ class MacroeconomistAgent:
         )
         return "\n\n".join(lines)
 
+    def _build_macro_consultant_answer(self, question: str, sources: List[Dict], date_str: str) -> str:
+        if not sources:
+            return (
+                "Minha resposta honesta: ainda nao tenho material suficiente na memoria para construir uma tese forte sobre isso.\n\n"
+                "Como macroeconomista, eu nao forcaria conviccao sem evidencias. O proximo passo seria coletar dados recentes, "
+                "separar fato de narrativa e so entao montar uma leitura de cenario."
+            )
+
+        topic = self._infer_topic_from_text(question)
+        lowered = question.lower()
+        top = sources[0]
+        top_meta = top.get("metadata", {}) or {}
+        top_label = (
+            top_meta.get("title")
+            or top_meta.get("focus_area")
+            or top_meta.get("source_name")
+            or top_meta.get("api")
+            or "o principal registro da memoria"
+        )
+
+        if any(marker in lowered for marker in ["mudar de opiniao", "mudar sua opiniao", "mudar de opinião", "invalidar", "qual dado"]):
+            return (
+                f"O dado que mais me faria mudar de opiniao, olhando {top_label}, seria um sinal contrario e persistente no proprio mecanismo que estou observando.\n\n"
+                f"No caso de {topic}, eu olharia principalmente para:\n"
+                f"1. Confirmacao: novos dados reforcando {top.get('snippet', '')}\n"
+                "2. Contradicao: indicadores importantes apontando na direcao oposta por mais de uma divulgacao.\n"
+                "3. Preco de mercado: juros, cambio ou credito reagindo de forma incompatível com a tese.\n"
+                "4. Narrativa oficial: bancos centrais ou fontes institucionais mudando o diagnostico.\n\n"
+                "Minha regra seria: um dado isolado me deixa alerta; uma sequencia coerente de dados me faz mudar a tese."
+            )
+
+        lines = [
+            f"Minha leitura de consultor macro, olhando a memoria de {date_str}: o sinal mais util agora vem de {top_label}.",
+            "",
+            f"1. O que estou aprendendo: {top.get('snippet', '')}",
+            "",
+            f"2. Por que isso importa: em {topic}, o ponto central e saber se o dado muda o regime ou apenas confirma ruido de curto prazo.",
+            "",
+            f"3. Tese provisoria: {self._build_regime_view(question)}",
+            "",
+            f"4. Implicacao pratica: {self._build_implications(question)}",
+            "",
+            f"5. O que me faria mudar de opiniao: {self._default_risk_answer(topic)}",
+        ]
+
+        if len(sources) > 1:
+            lines.extend(["", "Sinais secundarios que estou usando:"])
+            for item in sources[1:3]:
+                metadata = item.get("metadata", {}) or {}
+                label = (
+                    metadata.get("title")
+                    or metadata.get("focus_area")
+                    or metadata.get("source_name")
+                    or metadata.get("api")
+                    or "Memoria"
+                )
+                lines.append(f"- {label}: {item.get('snippet', '')}")
+
+        lines.extend(
+            [
+                "",
+                "Minha postura: eu trataria isso como uma tese viva. Boa macro nao e ter certeza cedo; e atualizar a conviccao quando entram sinais melhores.",
+            ]
+        )
+        return "\n".join(lines)
+
     def _build_chat_sources(self, results: List[Dict], question: str) -> List[Dict]:
         sources = []
         for result in results:
@@ -868,7 +1305,26 @@ class MacroeconomistAgent:
             return "Sem conteudo textual disponivel."
 
         compact = " ".join(text.split())
-        question_terms = [term for term in question.lower().split() if len(term) >= 4]
+        stopwords = {
+            "como",
+            "voce",
+            "você",
+            "esta",
+            "está",
+            "qual",
+            "quais",
+            "hoje",
+            "isso",
+            "sobre",
+            "para",
+            "porque",
+            "faria",
+        }
+        question_terms = [
+            term
+            for term in question.lower().replace("?", " ").split()
+            if len(term) >= 4 and term not in stopwords
+        ]
 
         best_start = 0
         best_score = -1
@@ -881,6 +1337,9 @@ class MacroeconomistAgent:
                 if score > best_score:
                     best_score = score
                     best_start = max(0, index - 80)
+
+        if best_score < 0:
+            best_start = 0
 
         snippet = compact[best_start : best_start + max_chars].strip()
         if best_start > 0:
@@ -955,6 +1414,32 @@ class MacroeconomistAgent:
             return (
                 f"Claro. Como consultor macro, eu posso aprofundar a parte mais importante de '{last_user}' ou transformar isso em tese, risco e implicacao pratica."
             )
+
+        return ""
+
+    def _answer_macro_small_talk(
+        self,
+        question: str,
+        conversation: List[Dict[str, str]],
+    ) -> str:
+        lowered = question.lower().strip()
+
+        if lowered in {"oi", "ola", "olá", "olÃ¡", "bom dia", "boa tarde", "boa noite"}:
+            return (
+                "Oi. Aqui eu entro no modo consultor macro senior: explico o que estou aprendendo, "
+                "como peso as evidencias, qual tese nasce disso e o que poderia me fazer mudar de opiniao.\n\n"
+                "Pode perguntar: 'qual e sua leitura central hoje?' ou 'como voce esta formando sua tese?'."
+            )
+
+        if any(marker in lowered for marker in ["como voce aprende", "como você aprende", "processo", "metodo", "método"]):
+            return (
+                "Meu processo e simples: primeiro separo fatos de narrativa; depois busco sinais recorrentes na memoria; "
+                "em seguida organizo uma tese, seus riscos e os dados que podem invalidar essa tese. "
+                "Eu tento evitar conclusoes fortes quando a evidencia ainda e fraca."
+            )
+
+        if lowered in {"obrigado", "obrigada", "valeu"}:
+            return "Sempre. A boa macro e menos adivinhar o futuro e mais saber quais sinais realmente mudam o cenario."
 
         return ""
 

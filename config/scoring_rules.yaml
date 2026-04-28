@@ -1,0 +1,5 @@
+weights:
+  macro_surprise: 0.35
+  source_quality: 0.25
+  x_recurrence: 0.15
+  editorial_potential: 0.25

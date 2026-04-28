@@ -1,0 +1,111 @@
+timezone: America/Sao_Paulo
+production:
+  generate_time_brt: "22:00"
+  target_day: next_day
+
+week:
+  monday:
+    performance: strong
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Personal"
+        type: personalidade
+  tuesday:
+    performance: peak
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Personal"
+        type: personalidade
+  wednesday:
+    performance: weak
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Personal"
+        type: personalidade
+  thursday:
+    performance: strong
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Personal"
+        type: personalidade
+  friday:
+    performance: strong
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Growth"
+        type: crescimento
+  saturday:
+    performance: medium
+    slots:
+      - time_brt: "08:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Growth"
+        type: crescimento
+  sunday:
+    performance: medium
+    slots:
+      - time_brt: "08:00"
+        label: "Value"
+        type: valor
+      - time_brt: "12:00"
+        label: "Growth"
+        type: crescimento
+      - time_brt: "18:00"
+        label: "Proof"
+        type: prova
+      - time_brt: "21:00"
+        label: "Personal"
+        type: personalidade

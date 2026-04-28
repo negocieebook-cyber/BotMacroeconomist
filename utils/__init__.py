@@ -10,6 +10,7 @@ from .report_writer import (
     save_report,
 )
 from .telegram_notifier import TelegramNotifier
+from .llm_client import MacroLLMClient
 from .theory_library import (
     get_macro_learning_cards,
     load_macro_library,
@@ -32,6 +33,7 @@ __all__ = [
     "build_telegram_market_brief",
     "save_report",
     "TelegramNotifier",
+    "MacroLLMClient",
     "get_macro_learning_cards",
     "load_macro_library",
     "select_relevant_theory_sections",

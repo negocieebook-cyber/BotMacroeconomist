@@ -1,0 +1,17 @@
+topics:
+  inflacao:
+    keywords: [cpi, inflation, inflacao, core, núcleo, pce]
+  juros:
+    keywords: [rate, rates, juros, selic, fed funds, corte, alta]
+  atividade:
+    keywords: [pmi, gdp, pib, industrial production, varejo, atividade]
+  emprego:
+    keywords: [payroll, unemployment, desemprego, jobs, emprego]
+  fiscal:
+    keywords: [fiscal, deficit, debt, divida, tesouro]
+  cambio:
+    keywords: [fx, usd, brl, eurusd, cambio, exchange rate]
+  commodities:
+    keywords: [oil, crude, cobre, minério, gas, commodity, commodities]
+  helio:
+    keywords: [helio, helium]

@@ -1,0 +1,64 @@
+editorial_hierarchy:
+  - voice
+  - editorial_proposition
+  - perceived_value
+  - elegance
+
+voice:
+  traits:
+    - human
+    - intelligent
+    - elegant
+    - concrete
+    - premium
+  avoid:
+    - linkedin tone
+    - moralizing
+    - vague futurism
+    - inflated adjectives
+
+mandatory_principles:
+  - utility must be tangible, not abstract
+  - every edition needs a clear promise
+  - structure must feel clean and inevitable
+  - the ending must create desire for continuity
+  - package insight into a framework, checklist, distinctions, or key questions
+  - prove value through specificity and evidence
+  - style should feel refined without sounding academic
+
+sections:
+  - title
+  - subtitle_promise
+  - opening
+  - tangible_deliverable
+  - closing
+  - cta
+
+deliverable_options:
+  - framework
+  - checklist
+  - key_questions
+  - conceptual_distinction
+  - operating_map
+
+never_do:
+  - long warm-up before the point
+  - generic listicles
+  - obvious advice
+  - motivational sermon
+  - overexplaining simple points
+
+generation_process:
+  - identify the strongest central idea in the material
+  - define the transformation promised to the reader
+  - choose the most concrete deliverable format
+  - build the issue around one elegant through-line
+  - make the closing widen the implication instead of repeating the intro
+  - produce title options across different sophistication levels
+
+output_format:
+  - central_idea
+  - promise
+  - newsletter
+  - cta
+  - alternative_titles

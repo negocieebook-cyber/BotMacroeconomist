@@ -52,6 +52,19 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Atalho com npm
+
+```bash
+# Depois de instalar as dependencias Python, voce tambem pode subir com:
+npm run dev
+```
+
+Se o PowerShell bloquear o comando `npm` por policy do Windows, use:
+
+```bash
+npm.cmd run dev
+```
+
 ### 2. Configurar API Keys (Opcionalmente)
 
 ```bash
@@ -69,6 +82,9 @@ export FRED_API_KEY="sua_chave_fred"
 # Modo completo recomendado: scheduler + memoria + respostas no Telegram
 python main.py start
 
+# Atalho equivalente via npm
+npm run dev
+
 # Atalho: sem argumentos, sobe o modo completo
 python main.py
 
@@ -77,6 +93,12 @@ python main.py demo
 
 # Fazer uma pergunta direta sobre o que o bot aprendeu
 python main.py ask "o que voce aprendeu hoje sobre inflacao?"
+
+# Carregar a base curada da estrutura seeded
+python main.py bootstrap-learning
+
+# Ver catalogo de contas e materiais curados
+python main.py learning-catalog
 
 # Entrar em modo de conversa no terminal
 python main.py chat
@@ -175,6 +197,23 @@ print(f"Documentos na memória: {status['memory']['total_documents']}")
 print(f"Taxa de sucesso: {status['task_stats']['success_rate']:.1f}%")
 ```
 
+## Aprendizado Curado
+
+O projeto agora aceita a estrutura seeded sem substituir o fluxo macro principal.
+
+### O que foi incorporado
+- `knowledge/seed_profiles.json`
+- `knowledge/cards/*.md`
+- `learn/bootstrap_user_context.py`
+
+### Como ativar
+
+```bash
+python main.py bootstrap-learning
+python main.py learning-catalog
+```
+
+Essas sementes passam a ficar disponiveis na mesma memoria usada pelo agente.
 ## 📊 Dados Coletados
 
 ### Inflação (Segunda)
@@ -319,3 +358,4 @@ Para dúvidas sobre as APIs:
 ---
 
 **Desenvolvido com ❤️ para macroeconomistas do futuro** 🚀
+

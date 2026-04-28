@@ -14,8 +14,8 @@ __pycache__/
 logs/
 *.log
 
+.tmp/
 data/
-memory/
 reports/
 
 .DS_Store

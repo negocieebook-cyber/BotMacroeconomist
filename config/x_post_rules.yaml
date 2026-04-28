@@ -1,0 +1,89 @@
+profile_identity:
+  handle_style: "@bpweb33"
+  language: english
+  niche: macro, crypto fundamentals, AI infrastructure
+  positioning: sharp macro operator with a calm tone, evidence first, no noise
+  core_promise: explain what matters, why it matters, and what to watch next
+
+format:
+  max_chars: 280
+  max_main_ideas: 1
+  include_number_early: true
+  use_arrow_lists: true
+  list_marker: "-->"
+  avoid_emojis: true
+  short_sentences: true
+
+style:
+  tone:
+    - technical
+    - clear
+    - direct
+    - shareable
+    - calm
+  principles:
+    - open with contrast, tension, or a hard claim
+    - one idea per post
+    - explain the second-order implication
+    - write with rhythm and white space
+    - stay inside the niche
+    - no fluff, no hype, no motivational filler
+  forbidden_terms:
+    - panic
+    - collapse
+    - explosion
+    - guaranteed
+    - life-changing
+  favorite_hooks:
+    - If I had to look at one chart today, it would be this
+    - The market is focused on the wrong number
+    - Most people are reacting to the headline, not the setup
+    - One thing worth remembering this week
+    - A simple framework for reading this move
+    - Don't be short-sighted
+
+post_types:
+  valor:
+    weekly_weight: 3
+    mission: teach the follower how to read the current macro setup calmly
+    ideal_time_brt: "08:00"
+    structure: useful morning lesson, three observed signals, practical close
+    hook_patterns:
+      - Three signs I am watching for tomorrow
+      - How to read this move without overreacting
+      - One useful way to read the data
+  crescimento:
+    weekly_weight: 2
+    mission: make macro accessible and shareable for non-followers
+    ideal_time_brt: "12:00"
+    structure: broad market angle, four concise points, question that invites sharing
+    hook_patterns:
+      - My analysis for tomorrow is this
+      - Why this matters outside the trading desk
+      - What the market may already be pricing
+  personalidade:
+    weekly_weight: 1
+    mission: show the real person behind the account through process, routine, mistakes, and honest reading
+    ideal_time_brt: "21:00"
+    structure: first-person observation, process line, lesson, calm closing
+    hook_patterns:
+      - One thing I try not to do when macro gets noisy
+      - I still force myself to slow down before judging a move
+      - The first read is rarely the useful one
+  prova:
+    weekly_weight: 1
+    mission: build authority by showing evidence, confirmed readings, mistakes learned, or what the data proves
+    ideal_time_brt: "18:00"
+    structure: name the myth, explain why it is incomplete, show conditional interpretation, close with principle
+    hook_patterns:
+      - A recurring mistake in macro
+      - It is not that simple
+      - Correlation is not a thesis
+
+operational:
+  batch_production: draft the next day in one session
+  reactive_slot: keep one flexible slot for a live reaction
+  tracking:
+    - save every draft with date, time, and type
+    - review replies and saves weekly
+    - repeat structures that earn attention without sacrificing clarity

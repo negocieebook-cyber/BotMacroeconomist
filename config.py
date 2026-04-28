@@ -13,8 +13,27 @@ WORLD_BANK_API_BASE = "https://api.worldbank.org/v2"
 OECD_API_BASE = "https://stats.oecd.org/sdmx-json"
 BIS_API_BASE = "https://stats.bis.org/statx/sdmx-json"
 
-# OpenAI (para embeddings - usar sentence-transformers como fallback gratuito)
+# OpenAI / OpenRouter (LLM opcional; embeddings seguem locais/OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+OPENAI_LLM_TEMPERATURE = float(os.getenv("OPENAI_LLM_TEMPERATURE", "0.2"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
+OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "BotMacroeconomist")
+
+# X / social listening.
+# Por padrao o projeto NAO depende da API do X. Sem token, a coleta fica
+# desabilitada e o pipeline usa RSS, sites e insumos manuais.
+X_COLLECTION_MODE = os.getenv("X_COLLECTION_MODE", "disabled").lower()
+X_ALLOW_MOCK_FALLBACK = os.getenv("X_ALLOW_MOCK_FALLBACK", "False").lower() == "true"
+X_CLIENT_ID = os.getenv("X_CLIENT_ID", "")
+X_CLIENT_SECRET = os.getenv("X_CLIENT_SECRET", "")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
+X_API_BASE = os.getenv("X_API_BASE", "https://api.x.com/2")
+X_POST_FETCH_LIMIT = int(os.getenv("X_POST_FETCH_LIMIT", "5"))
+X_REQUEST_TIMEOUT = int(os.getenv("X_REQUEST_TIMEOUT", "20"))
 
 # Telegram (opcional)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -28,6 +47,13 @@ DAILY_RESEARCH_HOUR_UTC = int(os.getenv("DAILY_RESEARCH_HOUR_UTC", "12"))
 DAILY_RESEARCH_MINUTE_UTC = int(os.getenv("DAILY_RESEARCH_MINUTE_UTC", "0"))
 DAILY_THESIS_HOUR_UTC = int(os.getenv("DAILY_THESIS_HOUR_UTC", "18"))
 DAILY_THESIS_MINUTE_UTC = int(os.getenv("DAILY_THESIS_MINUTE_UTC", "0"))
+
+# Briefing de Fechamento do Dia (22:00 BRT = 01:00 UTC)
+END_OF_DAY_BRIEFING_HOUR_UTC = int(os.getenv("END_OF_DAY_BRIEFING_HOUR_UTC", "1"))
+END_OF_DAY_BRIEFING_MINUTE_UTC = int(os.getenv("END_OF_DAY_BRIEFING_MINUTE_UTC", "0"))
+
+# Coleta de noticias: 3x ao dia (09:00, 13:00, 18:00 BRT = 12:00, 16:00, 21:00 UTC)
+NEWS_COLLECTION_HOURS_UTC = [12, 16, 21]
 DAILY_THESIS_TOPIC = os.getenv(
     "DAILY_THESIS_TOPIC",
     "inflacao, juros reais, crescimento, fiscal e risco financeiro",

@@ -1,0 +1,8 @@
+-r requirements-core.txt
+chromadb==0.4.14
+posthog<4
+sentence-transformers==2.2.2
+torch==2.1.1
+transformers==4.35.2
+huggingface-hub==0.19.4
+scikit-learn==1.3.2

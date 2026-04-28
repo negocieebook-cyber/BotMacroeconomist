@@ -1,0 +1,167 @@
+{
+  "x_accounts": [
+    {
+      "handle": "KobeissiLetter",
+      "url": "https://x.com/KobeissiLetter",
+      "role": "noticias"
+    },
+    {
+      "handle": "GabrielD_Ouro",
+      "url": "https://x.com/GabrielD_Ouro",
+      "role": "macro"
+    },
+    {
+      "handle": "PeterLBrandt",
+      "url": "https://x.com/PeterLBrandt",
+      "role": "macro"
+    },
+    {
+      "handle": "igor_mundstock",
+      "url": "https://x.com/igor_mundstock",
+      "role": "macro"
+    },
+    {
+      "handle": "TedPillows",
+      "url": "https://x.com/TedPillows",
+      "role": "macro"
+    },
+    {
+      "handle": "beincrypto",
+      "url": "https://x.com/beincrypto",
+      "role": "noticias"
+    },
+    {
+      "handle": "globalmarketss",
+      "url": "https://x.com/globalmarketss",
+      "role": "noticias"
+    },
+    {
+      "handle": "jpmayall",
+      "url": "https://x.com/jpmayall",
+      "role": "macro"
+    },
+    {
+      "handle": "Barchart",
+      "url": "https://x.com/Barchart",
+      "role": "noticias"
+    },
+    {
+      "handle": "intocryptoverse",
+      "url": "https://x.com/intocryptoverse",
+      "role": "macro"
+    },
+    {
+      "handle": "QCompounding",
+      "url": "https://x.com/QCompounding",
+      "role": "macro"
+    },
+    {
+      "handle": "JesseCohenInv",
+      "url": "https://x.com/JesseCohenInv",
+      "role": "macro"
+    },
+    {
+      "handle": "cadeinvests",
+      "url": "https://x.com/cadeinvests",
+      "role": "macro"
+    },
+    {
+      "handle": "leiatheinvestor",
+      "url": "https://x.com/leiatheinvestor",
+      "role": "noticias"
+    },
+    {
+      "handle": "fernandoulrich",
+      "url": "https://x.com/fernandoulrich",
+      "role": "macro"
+    },
+    {
+      "handle": "ducavendish",
+      "url": "https://x.com/ducavendish",
+      "role": "macro"
+    },
+    {
+      "handle": "AltCryptoGems",
+      "url": "https://x.com/AltCryptoGems",
+      "role": "macro"
+    },
+    {
+      "handle": "BrianFeroldi",
+      "url": "https://x.com/BrianFeroldi",
+      "role": "macro"
+    },
+    {
+      "handle": "Forbes",
+      "url": "https://x.com/Forbes",
+      "role": "noticias"
+    },
+    {
+      "handle": "GlobeEyeNews",
+      "url": "https://x.com/GlobeEyeNews",
+      "role": "noticias"
+    },
+    {
+      "handle": "NoLimitGains",
+      "url": "https://x.com/NoLimitGains",
+      "role": "noticias"
+    },
+    {
+      "handle": "Kalshi",
+      "url": "https://x.com/Kalshi",
+      "role": "noticias"
+    },
+    {
+      "handle": "WatcherGuru",
+      "url": "https://x.com/WatcherGuru",
+      "role": "noticias"
+    }
+  ],
+  "newsletter_learning": {
+    "source_files": [
+      "modelo cole news.txt",
+      "Texto colado.txt",
+      "playbook_resumo_newsletter.docx"
+    ],
+    "voice": [
+      "humano",
+      "inteligente",
+      "seguro"
+    ],
+    "positioning": [
+      "premium",
+      "util",
+      "pagavel",
+      "claro"
+    ],
+    "must_do": [
+      "entregar utilidade concreta, nao reflexao vaga",
+      "promessa especifica de ganho intelectual, emocional ou pratico",
+      "curadoria, precisao e densidade sem confusao",
+      "cada edicao precisa provar valor e gerar desejo de continuidade",
+      "organizar conhecimento em framework, mapa ou lente pratica",
+      "vender pela qualidade do raciocinio e nao por propaganda"
+    ]
+  },
+  "x_learning": {
+    "source_files": [
+      "manual_x_crescimento_v2.pdf",
+      "X Post Templates.pdf",
+      "agenda_semanal_x (1).docx",
+      "tom do tom.txt"
+    ],
+    "core_topics": [
+      "Macro",
+      "Cripto Fundamentals",
+      "IA"
+    ],
+    "posting_cadence": "4 posts por dia",
+    "style_principles": [
+      "abrir com valor ou contraste imediato",
+      "usar solucao simples ou contraintuitiva quando fizer sentido",
+      "fechar com principio memoravel",
+      "facilitar leitura com espaco, ritmo e concisao",
+      "manter nicho claro: macro, cripto fundamentals e IA"
+    ],
+    "reference_pattern": "hook forte + acao simples + principio memoravel"
+  }
+}
