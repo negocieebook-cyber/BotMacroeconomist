@@ -7,6 +7,7 @@ from .imf_api import IMFClient, BalanceOfPayments
 from .worldbank_api import WorldBankClient
 from .oecd_api import OECDClient
 from .bis_api import BISClient
+from .fmp_calendar_api import FmpEconomicCalendarClient
 from .research_monitor import ResearchMonitor
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "WorldBankClient",
     "OECDClient",
     "BISClient",
+    "FmpEconomicCalendarClient",
     "ResearchMonitor",
 ]

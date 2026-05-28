@@ -12,6 +12,13 @@ IMF_API_BASE = "https://api.imf.org/external/sdmx/2.1"
 WORLD_BANK_API_BASE = "https://api.worldbank.org/v2"
 OECD_API_BASE = "https://stats.oecd.org/sdmx-json"
 BIS_API_BASE = "https://stats.bis.org/statx/sdmx-json"
+FMP_API_KEY = os.getenv("FMP_API_KEY", "")
+FMP_ECONOMIC_CALENDAR_BASE = os.getenv(
+    "FMP_ECONOMIC_CALENDAR_BASE",
+    "https://financialmodelingprep.com/stable/economic-calendar",
+)
+ECONOMIC_CALENDAR_LOOKAHEAD_DAYS = int(os.getenv("ECONOMIC_CALENDAR_LOOKAHEAD_DAYS", "3"))
+ECONOMIC_CALENDAR_CACHE_MINUTES = int(os.getenv("ECONOMIC_CALENDAR_CACHE_MINUTES", "120"))
 
 # OpenAI / OpenRouter (LLM opcional; embeddings seguem locais/OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -38,6 +45,10 @@ X_REQUEST_TIMEOUT = int(os.getenv("X_REQUEST_TIMEOUT", "20"))
 # Telegram (opcional)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_ALLOWED_USER_IDS: list[int] = [
+    int(x) for x in os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").split(",")
+    if x.strip().isdigit()
+]
 ENABLE_TELEGRAM_NOTIFICATIONS = os.getenv("ENABLE_TELEGRAM_NOTIFICATIONS", "False").lower() == "true"
 DAILY_DIGEST_HOUR_UTC = int(os.getenv("DAILY_DIGEST_HOUR_UTC", "21"))
 DAILY_DIGEST_MINUTE_UTC = int(os.getenv("DAILY_DIGEST_MINUTE_UTC", "0"))

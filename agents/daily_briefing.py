@@ -65,6 +65,15 @@ class DailyBriefingBuilder:
         self.llm = llm
         self.base_dir = base_dir or Path.cwd()
 
+    def _get_live_economic_calendar(self) -> str:
+        try:
+            from apis.fmp_calendar_api import FmpEconomicCalendarClient
+            client = FmpEconomicCalendarClient()
+            return client.format_for_context(limit=12)
+        except Exception as exc:
+            logger.debug(f"Calendario economico indisponivel: {exc}")
+            return ""
+
     # ------------------------------------------------------------------
     # Ponto de entrada público
     # ------------------------------------------------------------------
@@ -77,15 +86,18 @@ class DailyBriefingBuilder:
         news        = self._filter(documents, "news_insight")
         tech        = self._filter(documents, "technical_learning")
         market_data = self._filter(documents, "market_data")
+        calendar_docs = self._filter(documents, "economic_calendar")
+        calendar_analysis = self._filter(documents, "economic_calendar_analysis")
         source_art  = self._filter(documents, "source_article")
         thesis_docs = self._filter(documents, "daily_thesis")
 
         market_live = self._get_live_market()
+        calendar_live = self._get_live_economic_calendar()
         news_live   = self._get_live_news()
 
         # Monta bloco de todos os fatos do dia para o LLM analisar
         raw_context = self._build_raw_context(
-            market_live, news_live, news, tech, market_data, source_art, thesis_docs
+            market_live, calendar_live, news_live, news, tech, market_data, calendar_docs, calendar_analysis, source_art, thesis_docs
         )
 
         # Tenta gerar analise rica com LLM
@@ -112,6 +124,10 @@ class DailyBriefingBuilder:
             "",
             self._section_markets(market_live),
             "",
+            self._section_economic_calendar(calendar_live, calendar_docs),
+            "",
+            self._section_calendar_analysis(calendar_analysis),
+            "",
             self._section_news(news, news_live),
             "",
             self._section_economic_data(market_data, source_art),
@@ -129,10 +145,13 @@ class DailyBriefingBuilder:
     def _build_raw_context(
         self,
         market_live: str,
+        calendar_live: str,
         news_live: str,
         news: List[Dict],
         tech: List[Dict],
         market_data: List[Dict],
+        calendar_docs: List[Dict],
+        calendar_analysis: List[Dict],
         source_art: List[Dict],
         thesis_docs: List[Dict],
     ) -> str:
@@ -141,6 +160,14 @@ class DailyBriefingBuilder:
 
         if market_live:
             parts.append(f"COTAÇÕES EM TEMPO REAL:\n{market_live}")
+
+        if calendar_live:
+            parts.append(f"CALENDARIO ECONOMICO:\n{calendar_live}")
+        elif calendar_docs:
+            parts.append(f"CALENDARIO ECONOMICO:\n{calendar_docs[-1].get('document', '')[:2000]}")
+
+        if calendar_analysis:
+            parts.append(f"ANALISE DO CALENDARIO ECONOMICO:\n{calendar_analysis[-1].get('document', '')[:2200]}")
 
         if news_live:
             parts.append(f"NOTÍCIAS AO VIVO (RSS):\n{news_live[:2000]}")
@@ -177,6 +204,30 @@ class DailyBriefingBuilder:
         if not market_text:
             market_text = "Dados de mercado indisponíveis no momento."
         return f"📊 *MERCADOS*\n{market_text}"
+
+    def _section_economic_calendar(self, calendar_text: str, calendar_docs: List[Dict]) -> str:
+        lines: List[str] = []
+        source = calendar_text
+        if not source and calendar_docs:
+            source = calendar_docs[-1].get("document", "")
+
+        for line in (source or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                lines.append(stripped)
+            if len(lines) >= 8:
+                break
+
+        return _section("CALENDARIO MACRO: HOJE E PROXIMOS DIAS", lines)
+
+    def _section_calendar_analysis(self, calendar_analysis: List[Dict]) -> str:
+        if not calendar_analysis:
+            return "LEITURA MACRO DO CALENDARIO\nNenhuma analise integrada do calendario registrada ainda."
+
+        doc = calendar_analysis[-1].get("document", "")
+        marker = "Analise:\n"
+        body = doc.split(marker, 1)[1] if marker in doc else doc
+        return f"LEITURA MACRO DO CALENDARIO\n{body.strip()[:1400]}"
 
     def _section_news(self, stored_news: List[Dict], live_news: str) -> str:
         lines: List[str] = []

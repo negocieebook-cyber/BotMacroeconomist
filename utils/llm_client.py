@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List
+from typing import AsyncGenerator, Dict, List
 
 from config import (
     OPENAI_API_KEY,
@@ -21,7 +21,7 @@ from config import (
 logger = logging.getLogger(__name__)
 
 try:
-    from openai import OpenAI
+    from openai import AsyncOpenAI, OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -61,6 +61,7 @@ class MacroLLMClient:
     def __init__(self):
         self.enabled = False
         self.client = None
+        self.async_client = None
         self.model = OPENAI_CHAT_MODEL
         self.provider = "openai"
 
@@ -74,12 +75,13 @@ class MacroLLMClient:
                     headers["HTTP-Referer"] = OPENROUTER_SITE_URL
                 if OPENROUTER_APP_NAME:
                     headers["X-Title"] = OPENROUTER_APP_NAME
-
-                self.client = OpenAI(
+                _kw = dict(
                     api_key=OPENROUTER_API_KEY,
                     base_url=OPENROUTER_BASE_URL,
                     default_headers=headers or None,
                 )
+                self.client = OpenAI(**_kw)
+                self.async_client = AsyncOpenAI(**_kw)
                 self.model = OPENROUTER_MODEL
                 self.provider = "openrouter"
                 self.enabled = True
@@ -91,6 +93,7 @@ class MacroLLMClient:
         if OPENAI_API_KEY:
             try:
                 self.client = OpenAI(api_key=OPENAI_API_KEY)
+                self.async_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                 self.model = OPENAI_CHAT_MODEL
                 self.provider = "openai"
                 self.enabled = True
@@ -101,27 +104,15 @@ class MacroLLMClient:
     def is_available(self) -> bool:
         return self.enabled and self.client is not None
 
-    def answer_question(
+    def build_question_messages(
         self,
         question: str,
         sources: List[Dict],
         conversation: List[Dict[str, str]],
         market_context: str = "",
         news_context: str = "",
-    ) -> str:
-        """
-        Responde pergunta como macroeconomista, integrando dados frescos.
-
-        Args:
-            question: Pergunta do usuário
-            sources: Documentos da memória ChromaDB
-            conversation: Histórico da sessão
-            market_context: Cotações em tempo real (texto)
-            news_context: Notícias recentes (texto)
-        """
-        if not self.is_available():
-            return ""
-
+    ) -> List[Dict[str, str]]:
+        """Monta a lista de mensagens para perguntas livres (sync ou streaming)."""
         context_parts = []
         if market_context:
             context_parts.append(f"=== MERCADO EM TEMPO REAL ===\n{market_context}")
@@ -131,14 +122,11 @@ class MacroLLMClient:
             context_parts.append(
                 f"=== BASE DE CONHECIMENTO ACUMULADA ===\n{self._format_sources(sources)}"
             )
-
         context_block = (
-            "\n\n".join(context_parts)
-            if context_parts
+            "\n\n".join(context_parts) if context_parts
             else "Sem dados externos disponíveis no momento."
         )
-
-        messages = [
+        return [
             {"role": "system", "content": MACROECONOMIST_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -150,7 +138,38 @@ class MacroLLMClient:
                 ),
             },
         ]
-        return self._chat_completion(messages)
+
+    def answer_question(
+        self,
+        question: str,
+        sources: List[Dict],
+        conversation: List[Dict[str, str]],
+        market_context: str = "",
+        news_context: str = "",
+    ) -> str:
+        if not self.is_available():
+            return ""
+        return self._chat_completion(
+            self.build_question_messages(question, sources, conversation, market_context, news_context)
+        )
+
+    async def stream_response(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
+        """Gera chunks de texto conforme o LLM responde (para streaming no Telegram)."""
+        if not self.is_available() or self.async_client is None:
+            return
+        try:
+            stream = await self.async_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=OPENAI_LLM_TEMPERATURE,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                if delta:
+                    yield delta
+        except Exception as exc:
+            logger.warning(f"Erro no streaming LLM ({self.provider}): {exc}")
 
     def answer_market_question(
         self,

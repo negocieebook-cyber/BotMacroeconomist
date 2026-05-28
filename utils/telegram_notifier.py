@@ -3,7 +3,8 @@ Notificador simples para Telegram.
 """
 
 import logging
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Union
 
 import requests
 
@@ -51,6 +52,41 @@ class TelegramNotifier:
             },
             timeout=REQUEST_TIMEOUT,
         )
+        response.raise_for_status()
+        return response.json()
+
+    def send_photo(
+        self,
+        photo_path: Union[str, Path],
+        caption: str = "",
+        chat_id: Optional[str] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> Dict:
+        if not self.bot_token:
+            raise ValueError("Telegram nao configurado. Defina TELEGRAM_BOT_TOKEN.")
+
+        target_chat_id = str(chat_id or self.chat_id)
+        if not target_chat_id:
+            raise ValueError("Telegram nao configurado. Defina TELEGRAM_CHAT_ID.")
+
+        path = Path(photo_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Imagem nao encontrada: {path}")
+
+        data = {
+            "chat_id": target_chat_id,
+            "caption": caption[:1024],
+        }
+        if reply_to_message_id is not None:
+            data["reply_to_message_id"] = str(reply_to_message_id)
+
+        with path.open("rb") as image_file:
+            response = requests.post(
+                f"{self.base_url}/sendPhoto",
+                data=data,
+                files={"photo": image_file},
+                timeout=REQUEST_TIMEOUT,
+            )
         response.raise_for_status()
         return response.json()
 

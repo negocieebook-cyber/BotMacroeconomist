@@ -34,14 +34,16 @@ Comandos:
     python main.py source-demo
     python main.py rss <feed_url> [source_name]
     python main.py daily-digest
+    python main.py economic-calendar
     python main.py report
+    python main.py charts
+    python main.py telegram-charts
     python main.py status
     python main.py run
     python main.py telegram-test
     python main.py telegram-chat-id
 """
 
-import json
 import sys
 import time
 from datetime import datetime, timezone
@@ -116,97 +118,127 @@ def ensure_startup_pipelines(base_dir: Path) -> None:
         logger.info("Pipeline de aprendizado ja esta atualizado nesta semana.")
 
 
+_HR = "  " + "─" * 38
+
+
+def _ok(val: bool) -> str:
+    return "✓" if val else "✗"
+
+
+def _row(label: str, value, width: int = 24) -> str:
+    return f"  {label:<{width}} {value}"
+
+
 def format_status_text(status: dict) -> str:
     task_stats = status.get("task_stats", {})
     memory = status.get("memory", {})
     system = status.get("system", {})
 
-    lines = [
-        "Status do BotMacroeconomist",
-        f"Horario: {status.get('timestamp', '-')}",
-        f"Documentos na memoria: {memory.get('total_documents', 0)}",
-        f"Execucoes: {task_stats.get('total_executions', 0)}",
-        f"Sucesso: {task_stats.get('successful', 0)}",
-        f"Falhas: {task_stats.get('failed', 0)}",
-        f"FRED pronto: {'sim' if system.get('fred_available') else 'nao'}",
-        f"IMF pronto: {'sim' if system.get('imf_available') else 'nao'}",
-        f"World Bank pronto: {'sim' if system.get('worldbank_available') else 'nao'}",
-        f"OECD pronto: {'sim' if system.get('oecd_available') else 'nao'}",
-        f"BIS pronto: {'sim' if system.get('bis_available') else 'nao'}",
-    ]
-    return "\n".join(lines)
+    total = task_stats.get("total_executions", 0)
+    ok    = task_stats.get("successful", 0)
+    fail  = task_stats.get("failed", 0)
+
+    return "\n".join([
+        "",
+        _HR,
+        "   BotMacroeconomist — Status",
+        _HR,
+        f"   {status.get('timestamp', '-')}",
+        "",
+        "   MEMÓRIA",
+        _row("  └ Documentos", memory.get("total_documents", 0)),
+        "",
+        "   TAREFAS",
+        _row("  ├ Total", total),
+        _row("  ├ Sucesso", ok),
+        _row("  └ Falhas", fail),
+        "",
+        "   APIS",
+        _row("  ├ FRED", _ok(system.get("fred_available"))),
+        _row("  ├ IMF", _ok(system.get("imf_available"))),
+        _row("  ├ World Bank", _ok(system.get("worldbank_available"))),
+        _row("  ├ OECD", _ok(system.get("oecd_available"))),
+        _row("  ├ BIS", _ok(system.get("bis_available"))),
+        _row("  └ Calendar FMP", _ok(system.get("fmp_calendar_available"))),
+        _HR,
+    ])
 
 
 def format_cycle_summary(label: str, data: dict) -> str:
-    content_size = len(str(data))
-    top_level_keys = list(data.keys())[:8] if isinstance(data, dict) else []
-    return (
-        f"Resumo da coleta: {label}\n"
-        f"Tamanho bruto: {content_size} caracteres\n"
-        f"Principais blocos: {', '.join(top_level_keys) if top_level_keys else 'nenhum'}"
-    )
+    size = len(str(data))
+    keys = ", ".join(list(data.keys())[:6]) if isinstance(data, dict) else "—"
+    return f"  [{label}]  {size:,} chars  |  {keys}"
 
 
 def format_learning_text(snapshot: dict) -> str:
     memory = snapshot.get("memory", {})
-    recent_documents = snapshot.get("recent_documents", [])
+    docs   = snapshot.get("recent_documents", [])
+    ts     = snapshot.get("timestamp", "-")
+    total  = memory.get("total_documents", 0)
 
     lines = [
-        "O que o agente esta aprendendo",
-        f"Horario: {snapshot.get('timestamp', '-')}",
-        f"Documentos na memoria: {memory.get('total_documents', 0)}",
+        "",
+        _HR,
+        "   Aprendizado do Agente",
+        _HR,
+        f"   {ts}  |  {total} docs na memória",
         "",
     ]
 
-    if not recent_documents:
-        lines.append("Nenhum aprendizado foi armazenado ainda.")
+    if not docs:
+        lines.append("   Nenhum aprendizado armazenado ainda.")
         return "\n".join(lines)
 
-    for index, item in enumerate(recent_documents, 1):
-        metadata = item.get("metadata", {})
-        lines.extend(
-            [
-                f"{index}. {metadata.get('focus_area', 'Sem foco definido')}",
-                f"API: {metadata.get('api', 'desconhecida')}",
-                f"Quando: {metadata.get('timestamp', '-')}",
-                f"Preview: {item.get('preview', '')}",
-                "",
-            ]
-        )
+    last = len(docs)
+    for i, item in enumerate(docs, 1):
+        meta = item.get("metadata", {})
+        branch = "└" if i == last else "├"
+        pipe   = " " if i == last else "│"
+        preview = (item.get("preview") or "")[:80]
+        lines += [
+            f"  {branch} [{i}] {meta.get('focus_area', 'Sem foco')}",
+            f"  {pipe}    API: {meta.get('api', '?')}  |  {meta.get('timestamp', '-')}",
+            f"  {pipe}    {preview}",
+            "",
+        ]
 
+    lines.append(_HR)
     return "\n".join(lines).strip()
 
 
 def format_thesis_text(thesis: dict) -> str:
     lines = [
-        f"Tese macro: {thesis.get('topic', '-')}",
-        f"Horario: {thesis.get('timestamp', '-')}",
-        f"Tese: {thesis.get('thesis', '-')}",
-        f"Fontes encontradas: {thesis.get('source_count', 0)}",
-        f"Memoria tecnica/mercado: {thesis.get('memory_count', 0)}",
         "",
-        "Evidencias:",
+        _HR,
+        f"   Tese Macro: {thesis.get('topic', '-')}",
+        _HR,
+        f"   {thesis.get('timestamp', '-')}  |  "
+        f"{thesis.get('source_count', 0)} fontes  |  "
+        f"{thesis.get('memory_count', 0)} memórias",
+        "",
+        f"   {thesis.get('thesis', '-')}",
+        "",
+        "   EVIDÊNCIAS",
     ]
-
     for item in thesis.get("evidence", []):
-        lines.append(f"- {item}")
+        lines.append(f"   • {item}")
 
-    lines.extend(["", "Riscos:"])
+    lines += ["", "   RISCOS"]
     for item in thesis.get("risks", []):
-        lines.append(f"- {item}")
+        lines.append(f"   • {item}")
 
-    lines.extend(["", "Citacoes:"])
     citations = thesis.get("citations", [])
-    if not citations:
-        lines.append("- Nenhuma citacao disponivel.")
-    else:
-        for citation in citations:
-            title = citation.get("title", "Sem titulo")
-            source = citation.get("source", "fonte")
-            published_at = citation.get("published_at", "-")
-            url = citation.get("url", "")
-            lines.append(f"- {title} | {source} | {published_at} {url}".strip())
+    if citations:
+        lines += ["", "   FONTES"]
+        for c in citations:
+            title  = c.get("title", "Sem título")
+            source = c.get("source", "fonte")
+            pub    = c.get("published_at", "-")
+            url    = c.get("url", "")
+            suffix = f"  → {url}" if url else ""
+            lines.append(f"   • {title} | {source} | {pub}{suffix}")
 
+    lines += [_HR, ""]
     return "\n".join(lines)
 
 
@@ -215,18 +247,14 @@ def format_chat_answer(response: dict) -> str:
 
     sources = response.get("sources", [])
     if sources:
-        lines.extend(["", "Fontes usadas:"])
+        lines += ["", "─── Fontes ──────────────────────────────"]
         for item in sources[:3]:
-            metadata = item.get("metadata", {})
+            meta = item.get("metadata", {})
             label = (
-                metadata.get("title")
-                or metadata.get("focus_area")
-                or metadata.get("source_name")
-                or metadata.get("api")
-                or "Memoria"
+                meta.get("title") or meta.get("focus_area")
+                or meta.get("source_name") or meta.get("api") or "Memória"
             )
-            timestamp = metadata.get("timestamp", "-")
-            lines.append(f"- {label} | {timestamp}")
+            lines.append(f"  • {label}  |  {meta.get('timestamp', '-')}")
 
     return "\n".join(lines)
 
@@ -276,6 +304,26 @@ def run_once() -> None:
             + format_status_text(status)
         )
         maybe_send_telegram(final_text)
+    finally:
+        agent.shutdown()
+
+
+def run_economic_calendar() -> None:
+    agent = MacroeconomistAgent(enable_scheduler=False)
+    try:
+        result = agent.collect_and_store_economic_calendar()
+        analysis = agent.build_economic_calendar_analysis(store_memory=True)
+        text = (
+            "Calendario economico FMP\n"
+            f"Intervalo: {result.get('from', '-')} a {result.get('to', '-')}\n"
+            f"Eventos encontrados: {result.get('events', 0)}\n"
+            f"Armazenado na memoria: {'sim' if result.get('stored') else 'nao'}\n"
+            f"Analise integrada: {analysis.get('status', '-')}, {analysis.get('events', 0)} eventos relevantes"
+        )
+        if not result.get("configured", True):
+            text += "\nFMP_API_KEY ainda nao esta configurada no .env."
+        logger.info("\n" + text)
+        maybe_send_telegram(text)
     finally:
         agent.shutdown()
 
@@ -697,6 +745,29 @@ def telegram_chat_id() -> None:
         logger.info("Confirme TELEGRAM_BOT_TOKEN no arquivo .env")
 
 
+def run_charts(send_telegram: bool = False) -> None:
+    agent = MacroeconomistAgent(enable_scheduler=False)
+    try:
+        report = agent.build_global_macro_visual_report(store_memory=True)
+        artifacts = report.get("artifacts", [])
+        if not artifacts:
+            logger.warning("Nenhum grafico macro foi gerado.")
+            return
+
+        logger.info(f"Graficos gerados: {len(artifacts)}")
+        for artifact in artifacts:
+            logger.info(f"- {artifact.title}: {artifact.path}")
+
+        if send_telegram:
+            notifier = TelegramNotifier()
+            notifier.send_long_message(report.get("text", "Relatorio macro visual gerado."))
+            for photo in report.get("photos", []):
+                notifier.send_photo(photo.get("path", ""), caption=photo.get("caption", ""))
+            logger.info("Graficos enviados para o Telegram")
+    finally:
+        agent.shutdown()
+
+
 def serve_telegram(agent: MacroeconomistAgent) -> None:
     try:
         start_telegram_bot(Path(__file__).resolve().parent, agent=agent)
@@ -736,50 +807,74 @@ def run_start() -> None:
 
 def print_help() -> None:
     logger.info(
-        "\n".join(
-            [
-                "Comandos disponiveis:",
-                "  python main.py start",
-                "  python main.py demo",
-                "  python main.py once",
-                "  python main.py learning",
-                "  python main.py ask <pergunta>",
-                "  python main.py chat",
-                "  python main.py macro-chat",
-                "  python main.py telegram-listen",
-                "  python main.py learn-now",
-                "  python main.py collect-articles",
-                "  python main.py daily-thesis",
-                "  python main.py bootstrap-learning",
-                "  python main.py bootstrap-assets",
-                "  python main.py learning-catalog",
-                "  python main.py daily",
-                "  python main.py weekly",
-                "  python main.py editorial-learn",
-                "  python main.py full-cycle",
-                "  python main.py topic <tema>",
-                "  python main.py ingest [--text ... --url ... --fact ... --source ... --topic ...]",
-                "  python main.py tracked-profiles",
-                "  python main.py x-drafts",
-                "  python main.py x-schedule",
-                "  python main.py x-tomorrow",
-                "  python main.py x-check",
-                "  python main.py newsletter-preview",
-                "  python main.py newsletter-draft",
-                "  python main.py telegram-editorial",
-                "  python main.py thesis <tema>",
-                "  python main.py source-demo",
-                "  python main.py rss <feed_url> [source_name]",
-                "  python main.py daily-digest",
-                "  python main.py briefing         # Briefing de fechamento do dia (22h BRT)",
-                "  python main.py news-now          # Coleta noticias RSS agora",
-                "  python main.py report",
-                "  python main.py status",
-                "  python main.py run",
-                "  python main.py telegram-test",
-                "  python main.py telegram-chat-id",
-            ]
-        )
+        "\n".join([
+            "",
+            _HR,
+            "   BotMacroeconomist — Comandos",
+            _HR,
+            "",
+            "   EXECUÇÃO",
+            "   start              modo completo (scheduler + Telegram)",
+            "   run                scheduler sem Telegram",
+            "   once               coleta única de dados",
+            "   demo               demonstração rápida",
+            "   status             estado do agente",
+            "",
+            "   CHAT",
+            "   chat               conversa com memória técnica",
+            "   macro-chat         conversa como consultor macro",
+            "   ask <pergunta>     pergunta direta à memória",
+            "",
+            "   ANÁLISE",
+            "   thesis <tema>      tese macro com evidências e riscos",
+            "   thesis             padrão: inflacao e juros reais",
+            "   daily-thesis       tese diária automática",
+            "",
+            "   PIPELINES",
+            "   daily              pipeline editorial diário",
+            "   weekly             pipeline editorial semanal",
+            "   editorial-learn    pipeline de aprendizado",
+            "   full-cycle         daily + weekly + learning",
+            "   topic <tema>       pipeline por tema",
+            "",
+            "   COLETA",
+            "   learn-now          aprendizado técnico imediato",
+            "   collect-articles   coleta de artigos de pesquisa",
+            "   news-now           coleta RSS agora",
+            "   rss <url> [nome]   ingere feed RSS",
+            "   ingest [opts]      ingere dado manual",
+            "                      --text --url --fact --source --topic",
+            "",
+            "   CONTEÚDO",
+            "   newsletter-preview newsletter atual",
+            "   newsletter-draft   gera e exibe newsletter",
+            "   x-drafts           drafts para X/Twitter",
+            "   x-schedule         agendamento da semana no X",
+            "   x-tomorrow         gera drafts para amanhã",
+            "   x-check            diagnóstico da API do X",
+            "",
+            "   RELATÓRIOS",
+            "   report             relatório de mercado completo",
+            "   charts             gráficos macro (data/charts/)",
+            "   briefing           briefing de fechamento do dia",
+            "   economic-calendar  calendário econômico FMP",
+            "   daily-digest       digest de aprendizado via Telegram",
+            "",
+            "   TELEGRAM",
+            "   telegram-listen    escuta mensagens do bot",
+            "   telegram-editorial bot editorial",
+            "   telegram-test      envia mensagem de teste",
+            "   telegram-charts    envia gráficos ao Telegram",
+            "   telegram-chat-id   descobre seu chat id",
+            "",
+            "   BOOTSTRAP",
+            "   bootstrap-learning inicializa base de conhecimento",
+            "   bootstrap-assets   reconstrói assets curados",
+            "   learning-catalog   exibe catálogo de fontes",
+            "   tracked-profiles   perfis monitorados no X",
+            "   source-demo        ingere artigo de demonstração",
+            _HR,
+        ])
     )
 
 
@@ -865,12 +960,18 @@ def main() -> None:
         run_rss(feed_url, source_name)
     elif command == "daily-digest":
         run_daily_digest()
+    elif command in {"economic-calendar", "calendar", "calendario"}:
+        run_economic_calendar()
     elif command == "briefing":
         run_briefing()
     elif command == "news-now":
         run_news_now()
     elif command == "report":
         run_report()
+    elif command == "charts":
+        run_charts(send_telegram=False)
+    elif command == "telegram-charts":
+        run_charts(send_telegram=True)
     elif command == "status":
         run_status()
     elif command == "run":

@@ -149,6 +149,7 @@ def main() -> int:
     allow_x_mock = _env("X_ALLOW_MOCK_FALLBACK", "False").lower() == "true"
     telegram_ready = bool(_env("TELEGRAM_BOT_TOKEN"))
     fred_ready = bool(_env("FRED_API_KEY")) and _env("FRED_API_KEY") != "seu_fred_api_key_aqui"
+    fmp_ready = bool(_env("FMP_API_KEY"))
     llm_ready = bool(_env("OPENAI_API_KEY")) or bool(_env("OPENROUTER_API_KEY"))
 
     print(f"X_COLLECTION_MODE={x_mode}")
@@ -162,6 +163,7 @@ def main() -> int:
         print("[AVISO] X habilitado sem token. Recomendado: X_COLLECTION_MODE=disabled.")
 
     print(f"[{'OK' if fred_ready else 'INFO'}] FRED_API_KEY {'configurada' if fred_ready else 'nao configurada ou placeholder'}")
+    print(f"[{'OK' if fmp_ready else 'INFO'}] FMP_API_KEY {'configurada' if fmp_ready else 'nao configurada'}")
     print(f"[{'OK' if llm_ready else 'INFO'}] LLM {'configurado' if llm_ready else 'opcional nao configurado'}")
     print(f"[{'OK' if telegram_ready else 'INFO'}] Telegram {'configurado' if telegram_ready else 'opcional nao configurado'}")
 

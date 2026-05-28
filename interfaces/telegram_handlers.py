@@ -7,11 +7,15 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, List, Dict
 
 import yaml
 
 from collect.manual_ingest import ingest_manual_item
 from memory.retrieval import load_recent_facts
+
+if TYPE_CHECKING:
+    from agents.macroeconomist import MacroeconomistAgent
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +163,7 @@ def handle_message(base_dir: Path, text: str, agent=None, chat_id: str = "telegr
             "Você pode conversar comigo livremente sobre qualquer tema macro — "
             "inflação, juros, câmbio, crescimento, mercado — ou usar os comandos:\n\n"
             "📊 /mercado — cotações em tempo real\n"
+            "📈 /graficos — gráficos macro globais\n"
             "📰 /noticias — últimas notícias macro\n"
             "🏦 /fred — dados do Federal Reserve\n"
             "📌 /ticker AAPL — cotação de qualquer ativo\n"
@@ -176,6 +181,7 @@ def handle_message(base_dir: Path, text: str, agent=None, chat_id: str = "telegr
         return (
             "📋 *Comandos disponíveis:*\n\n"
             "📊 /mercado — cotações em tempo real (Dólar, BTC, S&P, Ibovespa...)\n"
+            "📈 /graficos — gera e envia painéis macro globais\n"
             "📰 /noticias — últimas notícias Reuters, IMF, FT\n"
             "🏦 /fred — dados do Federal Reserve (CPI, Juros, Payroll)\n"
             "📌 /ticker AAPL — cotação de qualquer ativo (PETR4.SA, BTC-USD...)\n"
@@ -223,6 +229,27 @@ def handle_message(base_dir: Path, text: str, agent=None, chat_id: str = "telegr
         except Exception as exc:
             logger.warning(f"Erro em /mercado: {exc}")
             return f"❌ Erro ao buscar cotações: {exc}"
+
+    # -----------------------------------------------------------------------
+    # /graficos — gera e envia gráficos macro globais
+    # -----------------------------------------------------------------------
+    if text.startswith("/graficos"):
+        try:
+            force_all = "todos" in text.lower() or "completo" in text.lower()
+            if agent is not None:
+                report = agent.build_global_macro_visual_report(store_memory=True, force_send_all=force_all)
+            else:
+                from analytics.global_macro_charts import build_global_macro_visual_report
+
+                report = build_global_macro_visual_report(base_dir, force_send_all=force_all)
+            if not report.get("photos") and not report.get("text"):
+                return "Nao consegui gerar graficos agora. Verifique conexao com FRED/World Bank."
+            return report
+        except ImportError as exc:
+            return f"Dependencia ausente para graficos: {exc}. Rode pip install matplotlib pandas requests."
+        except Exception as exc:
+            logger.warning(f"Erro em /graficos: {exc}")
+            return f"Erro ao gerar graficos: {exc}"
 
     # -----------------------------------------------------------------------
     # /noticias — últimas notícias RSS
@@ -455,3 +482,28 @@ def handle_message(base_dir: Path, text: str, agent=None, chat_id: str = "telegr
         return response.get("answer", "Não entendi. Use /help para ver os comandos disponíveis.")
 
     return "Não entendi. Use /help para ver os comandos disponíveis."
+
+
+# ---------------------------------------------------------------------------
+# Helper para streaming (chamado pelo telegram_bot async)
+# ---------------------------------------------------------------------------
+
+def build_streaming_messages(
+    agent: "MacroeconomistAgent",
+    chat_id: str,
+    text: str,
+    base_dir: Path,
+) -> List[Dict[str, str]]:
+    """Monta as mensagens LLM para o path de streaming de texto livre."""
+    market_ctx = _get_market_snapshot_text()
+    news_ctx = _get_news_context_text()
+    response = agent.answer_learning_question(text, n_results=6, session_id=chat_id)
+    sources = response.get("sources", [])
+    conversation = agent.conversations.get(chat_id, [])
+    return agent.llm.build_question_messages(
+        question=text,
+        sources=sources,
+        conversation=conversation,
+        market_context=market_ctx,
+        news_context=news_ctx,
+    )

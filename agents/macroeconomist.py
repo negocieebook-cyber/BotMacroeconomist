@@ -5,17 +5,17 @@ Versao simplificada para manter o projeto funcional e facil de entender.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
 from apis.bis_api import BISClient
+from apis.fmp_calendar_api import FmpEconomicCalendarClient
 from apis.fred_api import FREDClient, MacroeconomicMonitor
 from apis.imf_api import BalanceOfPayments, IMFClient
 from apis.oecd_api import OECDClient
 from apis.research_monitor import ResearchMonitor
 from apis.worldbank_api import WorldBankClient
-from analysis import ThesisEngine
 from config import (
     DAILY_DIGEST_HOUR_UTC,
     DAILY_DIGEST_MINUTE_UTC,
@@ -30,6 +30,7 @@ from config import (
     ENABLE_TELEGRAM_NOTIFICATIONS,
     END_OF_DAY_BRIEFING_HOUR_UTC,
     END_OF_DAY_BRIEFING_MINUTE_UTC,
+    FMP_API_KEY,
     FRED_API_KEY,
     LOG_FILE,
     LOG_LEVEL,
@@ -69,9 +70,14 @@ class MacroeconomistAgent:
         self.worldbank = WorldBankClient()
         self.oecd = OECDClient()
         self.bis = BISClient()
+        self.economic_calendar = FmpEconomicCalendarClient()
         self.research_monitor = ResearchMonitor()
         self.macro_monitor = MacroeconomicMonitor()
-        self.thesis_engine = ThesisEngine()
+        try:
+            from analysis import ThesisEngine
+            self.thesis_engine = ThesisEngine()
+        except Exception:
+            self.thesis_engine = None
 
         logger.info("Inicializando memoria...")
         self.memory = ChromaDBManager()
@@ -624,6 +630,47 @@ class MacroeconomistAgent:
             logger.warning(f"Nao foi possivel garantir tese diaria: {str(e)}")
             return {"status": "failed", "error": str(e)}
 
+    def build_global_macro_visual_report(self, store_memory: bool = True, force_send_all: bool = False) -> Dict:
+        """
+        Gera o relatorio macro visual dentro do fluxo analitico do agente.
+
+        O resultado inclui:
+        - checagem dos dados liberados
+        - graficos salvos em PNG
+        - leitura macro do momento
+        - imagens prontas para envio no Telegram
+        """
+        from analytics.global_macro_charts import build_global_macro_visual_report
+
+        base_dir = Path(__file__).resolve().parent.parent
+        report = build_global_macro_visual_report(base_dir, force_send_all=force_send_all)
+
+        if store_memory and report.get("text"):
+            artifacts = report.get("artifacts", [])
+            chart_titles = [artifact.title for artifact in artifacts]
+            text = (
+                "Relatorio macro visual\n"
+                f"Gerado em: {datetime.now(timezone.utc).isoformat()}\n"
+                f"Graficos: {', '.join(chart_titles)}\n\n"
+                f"{report.get('data_status', '')}\n\n"
+                f"Analise:\n{report.get('text', '')}"
+            )
+            metadata = {
+                "api": "GLOBAL_MACRO_VISUAL_REPORT",
+                "focus_area": "Global_Macro_Visual_Analysis",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "type": "macro_visual_report",
+                "title": "Relatorio macro visual",
+                "chart_count": str(len(artifacts)),
+            }
+            try:
+                self.memory.add_data([text], [metadata])
+                logger.info("Relatorio macro visual salvo na memoria do agente")
+            except Exception as e:
+                logger.warning(f"Nao foi possivel salvar relatorio visual na memoria: {str(e)}")
+
+        return report
+
     def get_agent_status(self) -> Dict:
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -633,6 +680,7 @@ class MacroeconomistAgent:
             "recent_executions": self.task_manager.get_history(limit=5),
             "system": {
                 "fred_available": bool(self.fred) and FRED_API_KEY != "seu_fred_api_key_aqui",
+                "fmp_calendar_available": bool(self.economic_calendar) and bool(FMP_API_KEY),
                 "imf_available": bool(self.imf),
                 "worldbank_available": bool(self.worldbank),
                 "oecd_available": bool(self.oecd),
@@ -690,6 +738,9 @@ class MacroeconomistAgent:
         if self.llm.is_available():
             market_ctx = self._get_live_market_context()
             news_ctx = self._get_live_news_context()
+            calendar_ctx = self._get_live_economic_calendar_context()
+            if calendar_ctx:
+                news_ctx = f"{calendar_ctx}\n\n{news_ctx}" if news_ctx else calendar_ctx
 
             rich_answer = self.llm.answer_question(
                 question=message_text,
@@ -737,6 +788,14 @@ class MacroeconomistAgent:
             return collector.format_news_for_context(limit=5)
         except Exception as exc:
             logger.debug(f"Notícias indisponíveis para contexto LLM: {exc}")
+            return ""
+
+    def _get_live_economic_calendar_context(self) -> str:
+        """Busca calendario economico FMP como texto para injetar no LLM."""
+        try:
+            return self.economic_calendar.format_for_context(limit=12)
+        except Exception as exc:
+            logger.debug(f"Calendario economico indisponivel para contexto LLM: {exc}")
             return ""
 
     def learn_daily_technical_content(self) -> Dict:
@@ -829,6 +888,14 @@ class MacroeconomistAgent:
         except Exception as exc:
             logger.warning(f"ensure_daily_news falhou: {exc}")
         try:
+            self.ensure_daily_economic_calendar()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_economic_calendar falhou: {exc}")
+        try:
+            self.ensure_daily_economic_calendar_analysis()
+        except Exception as exc:
+            logger.warning(f"ensure_daily_economic_calendar_analysis falhou: {exc}")
+        try:
             self.ensure_daily_research_articles()
         except Exception as exc:
             logger.warning(f"ensure_daily_research_articles falhou: {exc}")
@@ -891,6 +958,251 @@ class MacroeconomistAgent:
             logger.warning(f"Falha na coleta de notícias: {exc}")
             return {"stored": 0, "duplicates": 0, "error": str(exc)}
 
+    def collect_and_store_economic_calendar(self, days_ahead: int = 3) -> Dict:
+        """Coleta calendario economico FMP de hoje ate os proximos dias e salva na memoria."""
+        today = datetime.now(timezone.utc).date()
+        end_date = today + timedelta(days=max(days_ahead, 0))
+
+        events = self.economic_calendar.get_calendar(today, end_date)
+        if not events:
+            return {
+                "stored": 0,
+                "events": 0,
+                "from": today.isoformat(),
+                "to": end_date.isoformat(),
+                "configured": self.economic_calendar.is_configured,
+            }
+
+        text = self.economic_calendar.format_for_context(events, limit=40)
+        metadata = {
+            "api": "FMP_ECONOMIC_CALENDAR",
+            "focus_area": "Economic_Calendar",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "economic_calendar",
+            "title": f"Calendario economico {today.isoformat()} a {end_date.isoformat()}",
+            "from_date": today.isoformat(),
+            "to_date": end_date.isoformat(),
+            "event_count": str(len(events)),
+        }
+
+        self.memory.add_data([text], [metadata])
+        logger.info(f"Calendario economico FMP armazenado: {len(events)} eventos")
+
+        return {
+            "stored": 1,
+            "events": len(events),
+            "from": today.isoformat(),
+            "to": end_date.isoformat(),
+        }
+
+    def build_economic_calendar_analysis(self, days_ahead: int = 3, store_memory: bool = True) -> Dict:
+        """
+        Cruza calendario economico com memoria, noticias e mercados para gerar leitura pre/pos-evento.
+
+        Pre-evento: actual vazio -> cenarios e ativos sensiveis.
+        Pos-evento: actual preenchido -> surpresa vs consenso/anterior e interpretacao macro.
+        """
+        today = datetime.now(timezone.utc).date()
+        end_date = today + timedelta(days=max(days_ahead, 0))
+        events = self.economic_calendar.get_calendar(today, end_date)
+        relevant_events = self._select_relevant_calendar_events(events)
+
+        if not relevant_events:
+            return {
+                "status": "no_events",
+                "from": today.isoformat(),
+                "to": end_date.isoformat(),
+                "events": 0,
+                "analysis": "Nenhum evento macro relevante encontrado no calendario FMP para o intervalo.",
+            }
+
+        memory_sources = self._calendar_memory_sources(relevant_events)
+        market_context = self._get_live_market_context()
+        news_context = self._get_live_news_context()
+        calendar_context = self.economic_calendar.format_for_context(relevant_events, limit=20)
+
+        analysis = ""
+        if self.llm.is_available():
+            question = (
+                "Monte uma analise macro usando o calendario economico abaixo junto com memoria, noticias e mercado. "
+                "Separe em: 1) eventos mais importantes, 2) leitura pre-evento para dados ainda nao divulgados, "
+                "3) leitura pos-evento para dados com actual preenchido, 4) relacao com noticias e precos, "
+                "5) impactos provaveis em dolar, juros, bolsa, ouro, petroleo, bitcoin e Brasil, "
+                "6) o que monitorar nas proximas horas/dias. "
+                "Nao invente numeros; use apenas actual, estimate, previous e os dados fornecidos. "
+                "Responda em portugues do Brasil, de forma objetiva.\n\n"
+                f"{calendar_context}"
+            )
+            analysis = self.llm.answer_question(
+                question=question,
+                sources=memory_sources,
+                conversation=[],
+                market_context=market_context,
+                news_context=news_context,
+            )
+
+        if not analysis:
+            analysis = self._fallback_calendar_analysis(relevant_events, memory_sources, market_context, news_context)
+
+        metadata = {
+            "api": "FMP_ECONOMIC_CALENDAR",
+            "focus_area": "Economic_Calendar_Analysis",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "economic_calendar_analysis",
+            "title": f"Analise do calendario economico {today.isoformat()} a {end_date.isoformat()}",
+            "from_date": today.isoformat(),
+            "to_date": end_date.isoformat(),
+            "event_count": str(len(relevant_events)),
+        }
+        text = (
+            f"Analise do calendario economico\n"
+            f"Intervalo: {today.isoformat()} a {end_date.isoformat()}\n\n"
+            f"{calendar_context}\n\n"
+            f"Analise:\n{analysis}"
+        )
+
+        if store_memory:
+            self.memory.add_data([text], [metadata])
+            logger.info("Analise do calendario economico armazenada na memoria")
+
+        return {
+            "status": "generated",
+            "from": today.isoformat(),
+            "to": end_date.isoformat(),
+            "events": len(relevant_events),
+            "analysis": analysis,
+            "sources": len(memory_sources),
+        }
+
+    def ensure_daily_economic_calendar(self) -> Dict:
+        """Garante que o calendario economico do dia esteja na memoria."""
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self.memory.has_document_for_date(
+            today,
+            metadata_type="economic_calendar",
+            focus_area="Economic_Calendar",
+        ):
+            logger.info("Calendario economico do dia ja presente na memoria")
+            return {"status": "already_collected", "date": today}
+
+        try:
+            result = self.collect_and_store_economic_calendar()
+            result["status"] = "collected"
+            result["date"] = today
+            return result
+        except Exception as e:
+            logger.warning(f"Nao foi possivel garantir calendario economico diario: {str(e)}")
+            return {"status": "failed", "date": today, "error": str(e)}
+
+    def ensure_daily_economic_calendar_analysis(self) -> Dict:
+        """Garante uma analise diaria que relaciona calendario, memoria, noticias e mercado."""
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self.memory.has_document_for_date(
+            today,
+            metadata_type="economic_calendar_analysis",
+            focus_area="Economic_Calendar_Analysis",
+        ):
+            logger.info("Analise do calendario economico ja presente na memoria")
+            return {"status": "already_analyzed", "date": today}
+
+        try:
+            result = self.build_economic_calendar_analysis(store_memory=True)
+            result["date"] = today
+            return result
+        except Exception as e:
+            logger.warning(f"Nao foi possivel analisar calendario economico diario: {str(e)}")
+            return {"status": "failed", "date": today, "error": str(e)}
+
+    def _select_relevant_calendar_events(self, events: List[Dict]) -> List[Dict]:
+        keywords = [
+            "cpi", "pce", "inflation", "payroll", "employment", "unemployment",
+            "interest rate", "rate decision", "fomc", "fed", "ecb", "bcb", "copom",
+            "gdp", "pmi", "retail sales", "ppi", "confidence", "trade balance",
+            "jobless", "claims", "industrial production", "oil inventories",
+        ]
+        selected = []
+        for event in events:
+            impact = str(event.get("impact") or "").lower()
+            name = str(event.get("event") or "").lower()
+            if impact in {"high", "medium"} or any(keyword in name for keyword in keywords):
+                selected.append(event)
+
+        def sort_key(item: Dict) -> tuple:
+            impact_order = {"high": 0, "medium": 1, "low": 2}
+            return (impact_order.get(str(item.get("impact") or "").lower(), 3), item.get("date") or "")
+
+        return sorted(selected, key=sort_key)[:20]
+
+    def _calendar_memory_sources(self, events: List[Dict]) -> List[Dict]:
+        queries = []
+        for event in events[:8]:
+            event_name = event.get("event") or ""
+            country = event.get("country") or ""
+            currency = event.get("currency") or ""
+            if event_name:
+                queries.append(f"{event_name} {country} {currency} inflacao juros crescimento mercado")
+
+        combined = []
+        seen_ids = set()
+        for query in queries[:6]:
+            results = self.memory.search(query, n_results=3).get("results", [])
+            for item in results:
+                item_id = item.get("id") or str(item.get("metadata", {}))[:120]
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+                combined.append(item)
+
+        return self._build_chat_sources(combined[:10], "calendario economico")
+
+    def _fallback_calendar_analysis(
+        self,
+        events: List[Dict],
+        memory_sources: List[Dict],
+        market_context: str,
+        news_context: str,
+    ) -> str:
+        lines = ["Leitura integrada do calendario economico:"]
+        for event in events[:8]:
+            actual = event.get("actual")
+            estimate = event.get("estimate")
+            previous = event.get("previous")
+            status = "pos-evento" if actual not in (None, "") else "pre-evento"
+            surprise = self._calendar_surprise_text(actual, estimate, previous)
+            lines.append(
+                f"- {event.get('date', '-')} | {event.get('country', '-')} {event.get('currency', '')} | "
+                f"{event.get('impact', '-')} | {event.get('event', 'Evento')} | {status}. {surprise}"
+            )
+
+        if market_context:
+            lines.append("")
+            lines.append("Mercado observado: " + market_context.replace("\n", " | ")[:700])
+        if news_context:
+            lines.append("")
+            lines.append("Noticias recentes usadas como pano de fundo: " + news_context.replace("\n", " ")[:700])
+        if memory_sources:
+            titles = [
+                source.get("title") or source.get("metadata", {}).get("focus_area") or "memoria"
+                for source in memory_sources[:4]
+            ]
+            lines.append("")
+            lines.append("Memoria relacionada: " + "; ".join(titles))
+
+        lines.append("")
+        lines.append(
+            "Uso pratico: antes da divulgacao, trate esses eventos como gatilhos de volatilidade; "
+            "depois da divulgacao, compare actual vs consenso e confirme se a reacao de juros, dolar e bolsa e coerente."
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _calendar_surprise_text(actual, estimate, previous) -> str:
+        if actual in (None, ""):
+            return f"Aguardando divulgacao; consenso: {estimate if estimate not in (None, '') else 'N/D'}; anterior: {previous if previous not in (None, '') else 'N/D'}."
+        if estimate not in (None, ""):
+            return f"Divulgado: actual {actual} vs consenso {estimate}; anterior {previous if previous not in (None, '') else 'N/D'}."
+        return f"Divulgado: actual {actual}; anterior {previous if previous not in (None, '') else 'N/D'}."
+
     def generate_end_of_day_briefing(self) -> Dict:
         """
         Gera o Briefing de Fechamento do Dia (22:00 BRT).
@@ -909,13 +1221,26 @@ class MacroeconomistAgent:
             from agents.daily_briefing import DailyBriefingBuilder
             builder = DailyBriefingBuilder(memory=self.memory, llm=self.llm, base_dir=base_dir)
             briefing_text = builder.build()
+            visual_report = self.build_global_macro_visual_report(store_memory=True)
+            visual_text = visual_report.get("text", "")
+            visual_photos = visual_report.get("photos", [])
 
             logger.info("Briefing de fechamento do dia gerado")
 
             # Salvar na memória para histórico
             today = datetime.now(timezone.utc).date().isoformat()
+            full_briefing_text = briefing_text
+            if visual_text:
+                full_briefing_text = (
+                    f"{briefing_text}\n\n"
+                    "==============================\n"
+                    "RELATORIO VISUAL MACRO\n"
+                    "==============================\n\n"
+                    f"{visual_text}"
+                )
+
             self.memory.add_data(
-                [briefing_text],
+                [full_briefing_text],
                 [{
                     "api": "DAILY_BRIEFING",
                     "focus_area": "End_Of_Day_Briefing",
@@ -929,11 +1254,23 @@ class MacroeconomistAgent:
             if ENABLE_TELEGRAM_NOTIFICATIONS and self.notifier:
                 try:
                     self.notifier.send_long_message(briefing_text)
+                    if visual_text:
+                        self.notifier.send_long_message(visual_text)
+                    for photo in visual_photos:
+                        self.notifier.send_photo(
+                            photo_path=photo.get("path", ""),
+                            caption=photo.get("caption", ""),
+                        )
                     logger.info("Briefing de fechamento enviado ao Telegram")
                 except Exception as exc:
                     logger.warning(f"Falha ao enviar briefing ao Telegram: {exc}")
 
-            return {"status": "generated", "date": today, "length": len(briefing_text)}
+            return {
+                "status": "generated",
+                "date": today,
+                "length": len(full_briefing_text),
+                "charts": len(visual_photos),
+            }
         except Exception as exc:
             logger.error(f"Erro ao gerar briefing de fechamento: {exc}")
             return {"status": "failed", "error": str(exc)}
@@ -1136,6 +1473,9 @@ class MacroeconomistAgent:
             refresh_plan.append(("trade_finance", self.thursday_trade_finance))
         if any(token in lowered for token in ["previsao", "forecast", "consensus", "ocde", "oecd"]):
             refresh_plan.append(("forecasts", self.friday_forecasts_consensus))
+        if any(token in lowered for token in ["calendario", "calendar", "evento", "eventos", "amanha", "amanhã", "sexta", "quinta", "dados"]):
+            refresh_plan.append(("economic_calendar", self.ensure_daily_economic_calendar))
+            refresh_plan.append(("economic_calendar_analysis", lambda: self.build_economic_calendar_analysis(store_memory=True)))
         if any(token in lowered for token in ["artigo", "artigos", "noticia", "noticias", "fonte", "fontes", "pesquisa", "research", "tese"]):
             refresh_plan.append(("daily_research", self.ensure_daily_research_articles))
 

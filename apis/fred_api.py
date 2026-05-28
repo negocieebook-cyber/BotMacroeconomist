@@ -2,12 +2,15 @@
 Integração com FRED API (Federal Reserve Economic Data)
 https://fred.stlouisfed.org/
 """
-import requests
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 import logging
-from config import FRED_API_KEY, FRED_SERIES, REQUEST_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
+
+import pandas as pd
+import requests
+
+from config import FRED_API_KEY, MAX_RETRIES, REQUEST_TIMEOUT, RETRY_DELAY
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +106,7 @@ class FREDClient:
             "series_id": series_id,
             "value": latest["value"],
             "date": latest["date"].strftime("%Y-%m-%d"),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
     def get_series_metadata(self, series_id: str) -> Dict:
@@ -146,14 +149,13 @@ class FREDClient:
             response = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             return response
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException as exc:
             if retries < MAX_RETRIES:
-                logger.warning(f"Erro na requisição, tentando novamente... ({retries + 1}/{MAX_RETRIES})")
-                import time
-                time.sleep(RETRY_DELAY)
+                wait = RETRY_DELAY * (2 ** retries)
+                logger.warning(f"Erro na requisição ({exc}), aguardando {wait}s... ({retries + 1}/{MAX_RETRIES})")
+                time.sleep(wait)
                 return self._make_request(url, params, retries + 1)
-            else:
-                raise
+            raise
 
 
 class MacroeconomicMonitor:
